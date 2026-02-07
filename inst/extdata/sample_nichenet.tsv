@@ -1,0 +1,4 @@
+sender	receiver	ligand	receptor	activity
+Macrophage	T_cell	TGFB1	TGFBR1	0.9
+T_cell	B_cell	IL2	IL2RA	0.85
+Fibroblast	Endothelial	VEGFA	KDR	0.95

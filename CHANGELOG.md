@@ -1,0 +1,234 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Removed
+- **`sankey_style()` and all style presets**: Removed `sankey_style()`, `list_styles()`, `get_sankey_style()`, `SankeyStyle`, and `TextStyle` entirely. Use `sankey_font()`, `sankey_nodes()`, `sankey_alpha()`, and `sankey_background()` directly for customization.
+
+### Changed
+- **`sankey_colors(by = "binary")` replaced with `by = "condition"`**: The "condition" strategy colors flows by the group/condition column (e.g., Control vs Treatment). When no group column is present, falls back to sender coloring. The old `"binary"` and `"group"` values are accepted with deprecation warnings.
+- **Uniform edge weight algorithm**: Uniform mode now uses equal redistribution at shared ligand/receptor nodes instead of assigning the same value to all edges. This makes uniform and flow-conserving modes visually distinguishable — uniform splits flow equally at branching points, while flow-conserving splits proportionally by expression.
+- **Example data decorrelated**: `example_communication()` receptor expression values are now decorrelated from activity values, making the difference between uniform and flow-conserving modes visible.
+
+### Changed
+- **SVG download button**: The plotly modebar download button now exports **SVG** instead of PNG by default. Configured via `plotly::config(toImageButtonOptions)` in `BasePlot$.apply_layout()`. This avoids the need for kaleido (Python) or Chrome for static image export — just click the camera icon in the toolbar.
+
+### Fixed
+- **`repr_html.sankey` S3 method not registered**: Added `@method repr_html sankey` and `@export` roxygen tags so that `NAMESPACE` contains `S3method(repr_html,sankey)`. Without this, IRkernel could not dispatch `repr::repr_html()` to our method, causing plots to silently fail to display in Jupyter notebooks.
+
+#### Static Image Export (`to_image`)
+- **Fixed scoping bug in error handlers**: `tryCatch` error handlers in `to_image()` now use `<<-` instead of `<-` to modify `methods_tried`. Previously, error messages from failed export methods were silently lost, making the final error message incomplete.
+- **Added `reticulate` to Suggests**: `reticulate` is used for kaleido-based export but was missing from `DESCRIPTION`, causing `R CMD check` warnings.
+- **Added micromamba environment discovery**: Python path search now scans `~/micromamba/envs/` and `$MAMBA_ROOT_PREFIX/envs/` for Python installations, so kaleido-based export works when R is started directly (not via `micromamba run`).
+- **Added static image export tests**: 6 new tests verify SVG, PNG, and PDF export via both `to_image()` and `sankey_save()`.
+
+#### Jupyter Notebook Display (VS Code, JupyterLab, Classic Notebook)
+- **Fixed display in all Jupyter environments**: Plots now display correctly in VS Code Jupyter, JupyterLab, and classic Jupyter Notebook.
+- **Solution**: Use `IRdisplay::display(fig)` to explicitly send htmlwidgets to Jupyter's display system. This is the ONLY reliable method.
+- **Key insight**: The return value of `print()` methods is always discarded by R. You cannot rely on returning a value from print - you MUST use side effects (`IRdisplay::display()` for Jupyter, `print()` for console).
+- **All display methods now work**: `p` (just typing), `print(p)`, `sankey_show(p)`, `sankey_flow()`, and `plot$show()` all work correctly.
+- **See `todo-jupyter-display.md`** for detailed documentation of failed approaches and why the current implementation must not be changed.
+- **SVG export without kaleido**: Added chromote-based fallback for SVG export. When kaleido is not available, ccflowR now uses Chrome/Chromium via chromote to render the plot and extract SVG using Plotly.js's built-in `toImage()` function.
+- **Better export error messages**: Export errors now show which methods were tried and why they failed, making troubleshooting easier.
+- **Export method detection order**:
+  1. Kaleido (Python) - supports all formats
+  2. Chromote (R) - supports SVG via Plotly.js
+  3. webshot2 (R) - supports PNG, PDF, JPEG
+  4. Orca (system) - supports all formats
+
+### Added
+
+#### New ggplot-like API (Priority 1 - COMPLETED)
+- **`sankey_plot()`**: New constructor function replacing `SankeyPlot$new()`. Accepts simple named vectors for colors.
+- **`+` operator**: Compose plots using ggplot2-style addition (e.g., `sankey_plot(data, colors) + sankey_style("presentation")`)
+- **Layer functions**: 20+ layer functions for customization:
+  - `sankey_colors(by = ...)` - Set coloring strategy (sender/receiver/ligand/group/binary)
+  - `sankey_alpha(value)` - Set flow transparency
+  - `sankey_style(name)` - Apply predefined styles
+  - `sankey_highlight(senders, ligands, receptors, receivers)` - Highlight pathways
+  - `sankey_clear_highlight()` - Clear highlighting
+  - `sankey_nodes(thickness, padding)` - Configure node appearance
+  - `sankey_order(senders, ligands, receptors, receivers)` - Custom node ordering
+  - `sankey_labels(size)` - Configure label appearance
+  - `sankey_interactive()` - Enable filter dropdowns
+  - `sankey_node_colors(mode)` - Node coloring mode
+  - `sankey_layout(width, height)` - Set dimensions
+  - `sankey_title(title)` - Add title
+  - `sankey_margins(left, right, top, bottom)` - Set margins
+  - `sankey_background(paper, plot)` - Set background colors
+  - `sankey_font(family, size)` - Set font properties
+  - `sankey_orientation(direction)` - Set horizontal/vertical
+  - `sankey_legend(show, title)` - Configure legend
+  - `sankey_group_colors(colors)` - Set group colors
+- **`sankey_save()`**: Export function for saving plots
+- **`sankey_render()`**: Get underlying plotly figure
+- **`sankey_unhighlight()`**: Alias for `sankey_clear_highlight()` for clarity
+- **S3 methods**: `print.sankey()`, `summary.sankey()` for intuitive interaction
+
+#### API Naming Improvements
+- **Reader functions renamed**: `from_liana()` → `read_liana()`, `from_cellphonedb()` → `read_cellphonedb()`
+- **`filter_top_interactions()`**: Moved to preprocessing.R for consistency
+- **`filter_by_ligands()`**: Parameter renamed from `ligands` to `include_ligands`
+- **`filter_by_receptors()`**: Parameter renamed from `receptors` to `include_receptors`
+- **`get_all_celltypes()`**: New function returning character vector (consistent with `extract_ligands()`/`extract_receptors()`)
+- **`hex_to_rgba()`**: Alias for `hex_with_alpha()` with clearer name
+
+**Example of new API:**
+```r
+# New intuitive API
+sankey_plot(data, colors) +
+  sankey_colors(by = "sender") +
+  sankey_alpha(0.7) +
+  sankey_style("presentation") +
+  sankey_highlight(senders = "Macrophage") +
+  sankey_title("Cell Communication")
+
+# Old API still works (backward compatible)
+SankeyPlot$new(data, colors)$colors("sender")$alpha(0.7)$show()
+```
+
+### Fixed
+- **Plot dimensions now work correctly in Jupyter notebooks**: Fixed issue where `layout(width, height)` parameters were ignored. Dimensions are now properly set in the plotly layout with `autosize = FALSE` to ensure the specified size is respected instead of expanding to fill the container.
+- **Plots now display automatically in Jupyter notebooks**: Fixed issue where plots wouldn't display when typing `p` in a cell. The `print.sankey()` method now returns the rendered plotly figure directly (instead of `invisible(x)`), allowing Jupyter's IRkernel repr system to display it automatically. Added `sankey_show()` as a fallback for explicit display.
+- **Test default values**: Fixed test expectations for default figure dimensions (600x900, not 1000x600)
+
+### Added
+- **`sankey_show()`**: New function for explicit plot display. Useful as a fallback if automatic display doesn't work in certain environments. Uses `IRdisplay::display()` when in Jupyter, falls back to `print()` otherwise.
+
+### Added
+- Comprehensive layout tests (`test-sankey-layout.R`) to verify plot dimensions, node properties, link properties, and Jupyter compatibility
+- New API test suite (`test-api.R`) with 50+ tests covering all new functions
+
+### Documented
+- **Known issue: Graph sometimes not printed on first execution** - This is a common plotly htmlwidget issue in certain R environments. Workaround is to re-run the code. See task.md for details.
+- **Essential Tutorial Components guide**: Added comprehensive checklist to task.md based on analysis of Seurat and Mellon documentation best practices. Includes structure requirements, before/after code block guidance, parameter documentation standards, decision guidance patterns, and a pre-publish tutorial checklist.
+
+#### Enhanced Example Data
+- **`example_communication()`**: Now includes `scaled_activity` and `scaled_receptor_expression` columns, enabling flow-conserving mode to work in tutorials instead of falling back to uniform.
+- **`example_multinichenet()`**: Now includes `prioritization_score`, `scaled_lfc_ligand`, and `scaled_lfc_receptor` columns for proper MultiNicheNet flow-conserving mode. Activity values are now deterministic (fixed) instead of random (`runif()`), so tutorial outputs are reproducible.
+
+#### Documentation (Priority 2 - COMPLETED)
+- **ContextNet + NicheNet Tutorial** (ENHANCED): Added "why" paragraphs before each step, interpretation notes after each visualization, parameter default values, and expected output descriptions.
+  - `notebooks/tutorial-contextnet-nichenet.ipynb` - Executable Jupyter notebook
+  - `vignettes/contextnet-nichenet.Rmd` - R vignette (eval=FALSE for plotly chunks)
+- **ContextNet + MultiNicheNet Tutorial** (ENHANCED): Added "why" paragraphs, interpretation guidance for group-colored plots, comparison guidance for per-condition views, and parameter defaults.
+  - `notebooks/tutorial-contextnet-multinichenet.ipynb` - Executable Jupyter notebook
+  - `vignettes/contextnet-multinichenet.Rmd` - R vignette (eval=FALSE for plotly chunks)
+- **Parameter Reference Guide** (NEW): Visual catalog of every ccflowR parameter with side-by-side comparisons. Covers all 19 `sankey_*` functions with 2-4 visual examples each, parameter defaults, and a quick reference table.
+  - `notebooks/tutorial-parameter-guide.ipynb` - Executable Jupyter notebook (81 cells)
+
+### Planned
+- pkgdown website setup
+- Enhanced README with visual examples
+See task.md for detailed documentation tasks.
+
+## [0.1.0] - 2025-01-14
+
+### Added
+
+#### Core Features
+- `SankeyPlot` R6 class for creating interactive Sankey diagrams of cell-cell communication
+- Method chaining API for fluent plot configuration
+- Four coloring strategies: `sender`, `ligand`, `group`, `binary`
+- Node highlighting with `highlight_nodes()` method
+- Custom node ordering with `order()` method
+- Link opacity control based on activity values
+
+#### Data Import
+- `read_nichenet()` - Import NicheNet output files (CSV/TSV)
+- `read_multinichenet()` - Import MultiNicheNet output with group information
+- `from_liana()` - Import LIANA output files with automatic rank-to-activity conversion
+- `from_cellphonedb()` - Import CellPhoneDB output files
+- Support for custom column name mapping
+
+#### Data Processing
+- `filter_by_celltypes()` - Filter by sender/receiver cell types (include or exclude)
+- `filter_by_pathways()` - Filter by specific ligand-receptor pathways
+- `filter_top_interactions()` - Keep top N interactions by activity
+- `remove_duplicates()` - Remove duplicate entries with multiple strategies
+
+#### Visualization Styles
+- Pre-defined styles: `default`, `minimal`, `bold`, `presentation`, `compact`, `dark`
+- `list_styles()` - List all available styles
+- `get_sankey_style()` - Get style configuration
+- `register_sankey_style()` - Register custom styles
+
+#### Color Management
+- `ColorPalette` R6 class for consistent color assignment
+- `hex_to_rgb()` and `rgb_to_hex()` - Color format conversion
+- `weighted_mix_colors()` - Mix multiple colors with weights
+- Automatic color generation using hashing
+
+#### Export Functions
+- `to_html()` - Export to interactive HTML file
+- `to_json()` - Export plot data as JSON
+- `to_image()` - Export to static image (requires kaleido/webshot2)
+- `save_figure()` - Unified export interface with format auto-detection
+
+#### Settings
+- `ccflow_settings()` - Global settings management with method chaining
+- Configurable: DPI, figure dimensions, font size, verbosity, theme
+
+#### Utilities
+- `example_communication()` - Generate example data for testing
+- `example_multinichenet()` - Generate multi-group example data
+- `summarize_data()` - Get data summary statistics
+- `extract_celltypes()`, `extract_ligands()`, `extract_receptors()` - Extract unique values
+- `validate_communication_data()` - Validate data structure
+
+### Technical Details
+- Built on plotly for interactive visualizations
+- R6 class system for object-oriented API
+- Comprehensive test suite with 470+ tests
+- Full roxygen2 documentation
+- Compatible with R >= 3.5.0
+
+## [Unreleased]
+
+### Added
+
+#### New Features
+- **Receiver-based coloring**: Added `color_by = "receiver"` option to `colors()` method and `sankey_flow()` function. Flows are now colored based on the target/receiver cell type instead of the sender. This complements the existing sender, ligand, group, and binary coloring strategies.
+
+#### Comprehensive Visual Testing System
+- `tests/testthat/test-visual-comprehensive.R` - 133 unit tests covering all visual features
+- `tests/visual-test-runner.R` - HTML generator for visual inspection (48 visual test cases)
+- `tests/README.md` - Testing documentation and visual QA checklist
+
+#### Visual Test Categories
+- **Node arrangement**: Custom ordering, padding, thickness, orientation
+- **Color schematics**: All coloring strategies (sender/ligand/group/binary), alpha, node color modes
+- **Labels**: All 5 positions (left/right/top/bottom/inside), various font sizes, long label handling
+- **Interactive features**: Dropdown filter functionality
+- **Highlighting**: Pathway highlighting by sender/ligand/receptor/receiver
+- **Dimensions**: Small to large plot dimension combinations
+- **Flow methods**: Flow-conserving vs uniform
+- **Combined**: Multiple features together for integration testing
+
+#### Edge Case Fixtures for Truncation Testing
+- `fixture_long_labels()` - Very long cell type and ligand/receptor names
+- `fixture_many_nodes()` - High number of nodes per layer (stress test)
+- `fixture_with_expression()` - Data with expression columns for flow-conserving
+- `fixture_multigroup()` - Multi-condition/group data
+- `fixture_minimal()` - Single interaction (minimal case)
+
+### Fixed
+- **Interactive filter dropdowns**: Fixed issue where selecting a filter option caused pathways to collapse/disappear instead of dimming non-matching pathways. Added regression test `"interactive filter buttons preserve all link colors"`.
+
+### Changed
+- **Label position warning**: `label_style(position = ...)` now emits a warning explaining that Plotly Sankey does not support custom label positioning (this is a Plotly API limitation, not a ccflowR bug). Labels are positioned automatically by Plotly.
+- **Improved test coverage**: Added tests for interactive filter button color arrays and label position warnings.
+- **NicheNet column handling**: For NicheNet data, `scaled_ligand_expression` now defaults to `scaled_activity` if not provided (per prioritization criteria documentation). This means NicheNet data only needs `scaled_activity` and `scaled_receptor_expression` columns for flow-conserving mode.
+- **Framework detection**: `detect_framework()` now identifies NicheNet data with minimal columns (`scaled_activity` + `scaled_receptor_expression`).
+- **SVG/static image export**: `to_image()` now properly configures reticulate Python environment before calling `plotly::save_image()`. Requires kaleido<1.0 (e.g., 0.2.1) due to API changes in kaleido 1.x.
+- **Default edge weight**: Changed default edge weight from 0.001 to 1 for flow-conserving mode (used when expression values are missing or zero).
+
+### Planned
+- Annotation-based label positioning workaround (future enhancement)
+- Comparative Sankey plots for multiple conditions
+- pkgdown documentation website

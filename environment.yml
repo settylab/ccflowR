@@ -1,0 +1,31 @@
+name: ccflowR_test
+channels:
+  - conda-forge
+dependencies:
+  # R base
+  - r-base>=4.2
+
+  # Core dependencies
+  - r-r6
+  - r-plotly
+  - r-dplyr
+  - r-tidyr
+  - r-jsonlite
+
+  # Testing dependencies
+  - r-testthat>=3.0.0
+  - r-devtools
+  - r-roxygen2
+  - r-covr
+  - r-vdiffr  # For visual regression testing (ggplot2 backend)
+
+  # Optional dependencies
+  - r-htmlwidgets
+  - r-knitr
+  - r-rmarkdown
+
+  # For static image export (install kaleido via pip if needed)
+  - python>=3.9
+  - pip
+  - pip:
+    - kaleido

@@ -1,0 +1,7 @@
+sender,receiver,ligand,receptor,group,prioritization_score
+Macrophage,T_cell,TGFB1,TGFBR1,Control,0.45
+Macrophage,T_cell,TGFB1,TGFBR1,Treatment,0.82
+T_cell,B_cell,IL2,IL2RA,Control,0.38
+T_cell,B_cell,IL2,IL2RA,Treatment,0.91
+Fibroblast,Endothelial,VEGFA,KDR,Control,0.52
+Fibroblast,Endothelial,VEGFA,KDR,Treatment,0.78

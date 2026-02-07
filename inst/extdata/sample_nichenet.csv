@@ -1,0 +1,10 @@
+sender,receiver,ligand,receptor,activity
+Macrophage,T_cell,TGFB1,TGFBR1,0.9
+Macrophage,Fibroblast,IL6,IL6R,0.75
+T_cell,B_cell,IL2,IL2RA,0.85
+T_cell,Macrophage,IFNG,IFNGR1,0.7
+Fibroblast,Endothelial,VEGFA,KDR,0.95
+Fibroblast,T_cell,FGF2,FGFR1,0.6
+Endothelial,Fibroblast,PDGFB,PDGFRB,0.8
+Endothelial,Macrophage,TNF,TNFRSF1A,0.65
+B_cell,T_cell,IL4,IL4R,0.55

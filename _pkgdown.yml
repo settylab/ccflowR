@@ -1,0 +1,97 @@
+url: https://github.com/your-username/ccflowR
+
+template:
+  bootstrap: 5
+  bootswatch: flatly
+
+navbar:
+  structure:
+    left:  [intro, reference, articles, tutorials, news]
+    right: [search, github]
+  components:
+    tutorials:
+      text: Tutorials
+      menu:
+        - text: "Interactive Jupyter Notebooks"
+        - text: "Introduction to ccflowR"
+          href: notebooks/01-introduction.html
+        - text: "Basic Workflow"
+          href: notebooks/02-basic-workflow.html
+        - text: "---"
+        - text: "Advanced Topics"
+        - text: "Advanced Usage"
+          href: notebooks/03-advanced-usage.html
+        - text: "Integration with Tools"
+          href: notebooks/04-integration.html
+
+reference:
+  - title: "Core Plotting"
+    desc: "Main classes for creating Sankey diagrams"
+    contents:
+      - SankeyPlot
+      - BasePlot
+
+  - title: "Data Import"
+    desc: "Functions to read cell-cell communication data"
+    contents:
+      - read_nichenet
+      - read_multinichenet
+      - from_liana
+      - from_cellphonedb
+
+  - title: "Data Processing"
+    desc: "Filter and preprocess communication data"
+    contents:
+      - filter_by_celltypes
+      - filter_by_pathways
+      - filter_top_interactions
+      - remove_duplicates
+      - validate_communication_data
+
+  - title: "Colors"
+    desc: "Color management utilities"
+    contents:
+      - ColorPalette
+      - hex_to_rgb
+      - rgb_to_hex
+      - weighted_mix_colors
+
+  - title: "Export"
+    desc: "Save plots to various formats"
+    contents:
+      - to_html
+      - to_json
+      - to_image
+      - save_figure
+
+  - title: "Settings"
+    desc: "Global configuration"
+    contents:
+      - ccflow_settings
+      - CCFlowSettings
+
+  - title: "Utilities"
+    desc: "Helper functions"
+    contents:
+      - example_communication
+      - example_multinichenet
+      - summarize_data
+      - extract_celltypes
+      - extract_ligands
+      - extract_receptors
+
+articles:
+  - title: "Getting Started"
+    navbar: ~
+    contents:
+      - quickstart
+
+  - title: "Guides"
+    contents:
+      - customization
+      - data-formats
+
+news:
+  releases:
+    - text: "Version 0.1.0"
+      href: news/index.html

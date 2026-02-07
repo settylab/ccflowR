@@ -1,0 +1,6 @@
+source,target,ligand.complex,receptor.complex,aggregate_rank
+Macrophage,T_cell,TGFB1,TGFBR1_TGFBR2,0.05
+T_cell,B_cell,IL2,IL2RA_IL2RB,0.02
+Fibroblast,Endothelial,VEGFA,KDR,0.08
+Endothelial,Macrophage,TNF,TNFRSF1A,0.12
+B_cell,T_cell,IL4,IL4R_IL2RG,0.15
