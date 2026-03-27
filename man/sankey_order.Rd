@@ -25,7 +25,8 @@ A sankey_layer object
 }
 \description{
 Control the vertical order of nodes within each layer. By default, nodes are
-ordered by their first appearance in the data.
+ordered using an activity-weighted barycenter heuristic to minimize link
+crossings. Use this function to override with a custom order.
 }
 \examples{
 ex <- example_communication()

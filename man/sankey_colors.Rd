@@ -17,7 +17,9 @@ sankey_colors(
 \item{"ligand"}{Color by ligand molecule. Shows signaling pathways.}
 \item{"condition"}{Color by experimental condition/group. Uses group colors when
 \code{group_col} is set in \code{sankey_plot()}; falls back to sender coloring otherwise.}
-}}
+}
+Alternatively, pass any valid color string (e.g., \code{"steelblue"}, \code{"#3498db"})
+to use a single fixed color for all flows.}
 
 \item{binary_color}{Deprecated. Ignored.}
 }

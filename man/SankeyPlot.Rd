@@ -174,7 +174,9 @@ Configure coloring strategy
 \subsection{Arguments}{
 \if{html}{\out{<div class="arguments">}}
 \describe{
-\item{\code{color_by}}{One of "sender", "receiver", "ligand", "condition"}
+\item{\code{color_by}}{One of "sender", "receiver", "ligand", "condition",
+or any valid color string (e.g., "steelblue", "#3498db") to use a
+single fixed color for all flows.}
 
 \item{\code{binary_color}}{Deprecated. Ignored.}
 }
@@ -250,7 +252,7 @@ Self (invisibly) for chaining
 \subsection{Method \code{nodes()}}{
 Configure node appearance
 \subsection{Usage}{
-\if{html}{\out{<div class="r">}}\preformatted{SankeyPlot$nodes(thickness = NULL, padding = NULL)}\if{html}{\out{</div>}}
+\if{html}{\out{<div class="r">}}\preformatted{SankeyPlot$nodes(thickness = NULL, padding = NULL, arrangement = NULL)}\if{html}{\out{</div>}}
 }
 
 \subsection{Arguments}{
@@ -259,6 +261,9 @@ Configure node appearance
 \item{\code{thickness}}{Node thickness in pixels}
 
 \item{\code{padding}}{Padding between nodes}
+
+\item{\code{arrangement}}{Plotly arrangement mode: "fixed" (default, preserves node
+order), or "snap" (allows interactive dragging).}
 }
 \if{html}{\out{</div>}}
 }

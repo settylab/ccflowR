@@ -13,10 +13,11 @@ sankey_flow(
   height = NULL,
   alpha = 0.65,
   label_size = 16,
-  label_position = "right",
+  label_position = NULL,
   flow_method = c("flow_conserving", "uniform"),
   node_color_mode = c("cell_type", "weighted_mix"),
   interactive = FALSE,
+  receptor_col = "receptor",
   ...
 )
 }
@@ -26,7 +27,9 @@ MultiNicheNet output formats. MultiNicheNet columns are automatically mapped.}
 
 \item{cell_colors}{Named list/vector of cell type colors}
 
-\item{color_by}{Coloring strategy: "sender", "receiver", "ligand", or "condition"}
+\item{color_by}{Coloring strategy: "sender", "receiver", "ligand", "condition",
+or any valid color string (e.g., "steelblue", "#3498db") to use a single
+fixed color for all flows.}
 
 \item{title}{Plot title}
 
@@ -58,6 +61,10 @@ weighted by scaled_receptor_expression. Creates a visual color flow through the 
 }}
 
 \item{interactive}{Enable interactive filter dropdowns (default: FALSE)}
+
+\item{receptor_col}{Name of the receptor column. Set to NULL to omit
+the receptor layer (3-layer plot: sender -> ligand -> receiver).
+Default: "receptor".}
 
 \item{...}{Additional arguments passed to SankeyPlot$new()}
 }

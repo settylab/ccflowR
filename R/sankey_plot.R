@@ -70,6 +70,7 @@ SankeyPlot <- R6::R6Class(
                           width = NULL,
                           height = NULL) {
 
+      flow_explicit <- !missing(flow_method)
       flow_method <- match.arg(flow_method)
 
       # Auto-prepare data if requested (detect framework and map columns)
@@ -77,8 +78,16 @@ SankeyPlot <- R6::R6Class(
         data <- prepare_sankey_data(data, auto_map = TRUE)
       }
 
+      # Determine if receptor layer is present
+      if (is.null(receptor_col)) {
+        private$.has_receptor <- FALSE
+      } else {
+        private$.has_receptor <- TRUE
+      }
+
       # Validate required columns
-      required <- c(sender_col, ligand_col, receptor_col, receiver_col)
+      required <- c(sender_col, ligand_col, receiver_col)
+      if (private$.has_receptor) required <- c(required, receptor_col)
       validate_required_columns(data, required)
 
       super$initialize(data, width, height)
@@ -103,10 +112,20 @@ SankeyPlot <- R6::R6Class(
       private$.activity_col <- activity_col
 
       # Determine if flow-conserving is possible
-      can_flow_conserve <- validate_sankey_input(data, require_weights = TRUE)
-      if (flow_method == "flow_conserving" && !can_flow_conserve) {
-        ccflow_log("Falling back to uniform flow method")
-        flow_method <- "uniform"
+      if (!private$.has_receptor) {
+        # 3-layer mode: flow-conserving requires receptor expression, fall back
+        if (flow_method == "flow_conserving") {
+          ccflow_log("No receptor layer: falling back to uniform flow method")
+          flow_method <- "uniform"
+        }
+        can_flow_conserve <- FALSE
+      } else {
+        can_flow_conserve <- validate_sankey_input(data, require_weights = TRUE,
+                                                      warn = flow_explicit)
+        if (flow_method == "flow_conserving" && !can_flow_conserve) {
+          ccflow_log("Falling back to uniform flow method")
+          flow_method <- "uniform"
+        }
       }
       private$.flow_method <- flow_method
 
@@ -133,6 +152,7 @@ SankeyPlot <- R6::R6Class(
       private$.node_thickness <- 25
       private$.node_padding <- 40
       private$.orientation <- "h"  # horizontal
+      private$.arrangement <- "snap"
       private$.node_order <- NULL
       private$.highlight_pathway <- NULL
       private$.highlight_alpha <- 0.1
@@ -151,7 +171,9 @@ SankeyPlot <- R6::R6Class(
     },
 
     #' @description Configure coloring strategy
-    #' @param color_by One of "sender", "receiver", "ligand", "condition"
+    #' @param color_by One of "sender", "receiver", "ligand", "condition",
+    #'   or any valid color string (e.g., "steelblue", "#3498db") to use a
+    #'   single fixed color for all flows.
     #' @param binary_color Deprecated. Ignored.
     #' @return Self (invisibly) for chaining
     colors = function(color_by = c("sender", "receiver", "ligand", "condition"),
@@ -165,8 +187,17 @@ SankeyPlot <- R6::R6Class(
       if (!is.null(color_by) && length(color_by) == 1 && color_by == "group") {
         color_by <- "condition"
       }
-      color_by <- match.arg(color_by)
-      private$.color_by <- color_by
+      # Check if color_by is a named strategy or a fixed color
+      strategies <- c("sender", "receiver", "ligand", "condition")
+      if (length(color_by) == 1 && !(color_by %in% strategies)) {
+        # Treat as a fixed color string
+        private$.color_by <- "fixed"
+        private$.fixed_flow_color <- color_by
+      } else {
+        color_by <- match.arg(color_by)
+        private$.color_by <- color_by
+        private$.fixed_flow_color <- NULL
+      }
       if (!is.null(binary_color)) {
         warning("The binary_color parameter is deprecated and ignored.", call. = FALSE)
       }
@@ -200,10 +231,16 @@ SankeyPlot <- R6::R6Class(
     #' @description Configure node appearance
     #' @param thickness Node thickness in pixels
     #' @param padding Padding between nodes
+    #' @param arrangement Plotly arrangement mode: "fixed" (default, preserves node
+    #'   order), or "snap" (allows interactive dragging).
     #' @return Self (invisibly) for chaining
-    nodes = function(thickness = NULL, padding = NULL) {
+    nodes = function(thickness = NULL, padding = NULL, arrangement = NULL) {
       if (!is.null(thickness)) private$.node_thickness <- thickness
       if (!is.null(padding)) private$.node_padding <- padding
+      if (!is.null(arrangement)) {
+        arrangement <- match.arg(arrangement, c("fixed", "snap", "freeform", "perpendicular"))
+        private$.arrangement <- arrangement
+      }
       invisible(self)
     },
 
@@ -214,12 +251,21 @@ SankeyPlot <- R6::R6Class(
     #' @param receivers Order of receiver nodes
     #' @return Self (invisibly) for chaining
     node_order = function(senders = NULL, ligands = NULL, receptors = NULL, receivers = NULL) {
+      if (!private$.has_receptor && !is.null(receptors)) {
+        warning("receptors ordering ignored: receptor layer is not displayed", call. = FALSE)
+        receptors <- NULL
+      }
       private$.node_order <- list(
         senders = senders,
         ligands = ligands,
         receptors = receptors,
         receivers = receivers
       )
+      # Lock positions when custom order is specified, so Plotly
+      # doesn't rearrange nodes and override the user's order
+      if (!is.null(senders) || !is.null(ligands) || !is.null(receptors) || !is.null(receivers)) {
+        private$.arrangement <- "fixed"
+      }
       invisible(self)
     },
 
@@ -233,6 +279,10 @@ SankeyPlot <- R6::R6Class(
     highlight_pathway = function(senders = NULL, ligands = NULL,
                                   receptors = NULL, receivers = NULL,
                                   dim_alpha = 0.1) {
+      if (!private$.has_receptor && !is.null(receptors)) {
+        warning("receptors highlighting ignored: receptor layer is not displayed", call. = FALSE)
+        receptors <- NULL
+      }
       private$.highlight_pathway <- list(
         senders = senders,
         ligands = ligands,
@@ -325,10 +375,16 @@ SankeyPlot <- R6::R6Class(
 
       # Check if flow-conserving is possible
       if (method == "flow_conserving") {
-        can_flow_conserve <- validate_sankey_input(private$.data, require_weights = TRUE)
-        if (!can_flow_conserve) {
-          warning("Cannot use flow_conserving method: missing required columns. Using uniform instead.")
+        if (!private$.has_receptor) {
+          warning("Cannot use flow_conserving method without receptor layer. Using uniform instead.",
+                  call. = FALSE)
           method <- "uniform"
+        } else {
+          can_flow_conserve <- validate_sankey_input(private$.data, require_weights = TRUE)
+          if (!can_flow_conserve) {
+            warning("Cannot use flow_conserving method: missing required columns. Using uniform instead.")
+            method <- "uniform"
+          }
         }
       }
 
@@ -359,19 +415,30 @@ SankeyPlot <- R6::R6Class(
       if (mode == "weighted_mix") {
         data <- private$.data
         ligand_expr_col <- private$.ligand_expr_col
-        receptor_expr_col <- private$.receptor_expr_col
 
         has_ligand_expr <- !is.null(ligand_expr_col) && ligand_expr_col %in% colnames(data)
-        has_receptor_expr <- !is.null(receptor_expr_col) && receptor_expr_col %in% colnames(data)
 
-        if (!has_ligand_expr || !has_receptor_expr) {
-          warning("Cannot use weighted_mix mode: missing expression columns. ",
-                  "Need '", ligand_expr_col, "' and '", receptor_expr_col, "'. ",
-                  "Using cell_type mode instead.")
-          mode <- "cell_type"
+        if (private$.has_receptor) {
+          receptor_expr_col <- private$.receptor_expr_col
+          has_receptor_expr <- !is.null(receptor_expr_col) && receptor_expr_col %in% colnames(data)
+
+          if (!has_ligand_expr || !has_receptor_expr) {
+            warning("Cannot use weighted_mix mode: missing expression columns. ",
+                    "Need '", ligand_expr_col, "' and '", receptor_expr_col, "'. ",
+                    "Using cell_type mode instead.")
+            mode <- "cell_type"
+          } else {
+            private$.compute_weighted_node_colors()
+          }
         } else {
-          # Compute the mixed colors
-          private$.compute_weighted_node_colors()
+          # 3-layer mode: only need ligand expression
+          if (!has_ligand_expr) {
+            warning("Cannot use weighted_mix mode: missing '", ligand_expr_col, "'. ",
+                    "Using cell_type mode instead.")
+            mode <- "cell_type"
+          } else {
+            private$.compute_weighted_node_colors()
+          }
         }
       }
 
@@ -390,7 +457,25 @@ SankeyPlot <- R6::R6Class(
       # node arrangement. The label_position setting is stored but not used.
 
       # Create Sankey trace
-      # Note: We don't specify x/y positions - let Plotly auto-arrange for best results
+      # When no custom order is specified, omit x/y to let Plotly fully
+      # handle the layout (minimizes crossings, especially in L-R layer).
+      # When custom order is set, provide explicit x/y with arrangement="fixed".
+      node_config <- list(
+        pad = private$.node_padding,
+        thickness = private$.node_thickness,
+        line = list(color = "black", width = 1),
+        label = sankey_data$node_labels,
+        color = sankey_data$node_colors,
+        customdata = sankey_data$node_hover_labels,
+        hovertemplate = "%{customdata}<extra></extra>"
+      )
+
+      # Only set explicit positions when user specified custom order
+      if (!is.null(sankey_data$node_x)) {
+        node_config$x <- sankey_data$node_x
+        node_config$y <- sankey_data$node_y
+      }
+
       fig <- plotly::plot_ly(
         type = "sankey",
         orientation = private$.orientation,
@@ -398,20 +483,14 @@ SankeyPlot <- R6::R6Class(
           size = private$.label_font_size,
           family = private$.font$family %||% "Arial"
         ),
-        node = list(
-          pad = private$.node_padding,
-          thickness = private$.node_thickness,
-          line = list(color = "black", width = 1),
-          label = sankey_data$node_labels,
-          color = sankey_data$node_colors
-        ),
+        node = node_config,
         link = list(
           source = sankey_data$link_source,
           target = sankey_data$link_target,
           value = sankey_data$link_value,
           color = sankey_data$link_colors
         ),
-        arrangement = "snap"
+        arrangement = private$.arrangement
       )
 
       # Apply layout
@@ -430,16 +509,20 @@ SankeyPlot <- R6::R6Class(
     #' @return List with configuration summary
     summary = function() {
       data <- private$.data
-      list(
+      result <- list(
         n_interactions = nrow(data),
         n_senders = length(unique(data[[private$.sender_col]])),
         n_receivers = length(unique(data[[private$.receiver_col]])),
         n_ligands = length(unique(data[[private$.ligand_col]])),
-        n_receptors = length(unique(data[[private$.receptor_col]])),
+        has_receptor = private$.has_receptor,
         color_by = private$.color_by,
         alpha = private$.alpha,
         dimensions = c(width = private$.width, height = private$.height)
       )
+      if (private$.has_receptor) {
+        result$n_receptors <- length(unique(data[[private$.receptor_col]]))
+      }
+      result
     }
   ),
 
@@ -452,6 +535,7 @@ SankeyPlot <- R6::R6Class(
     .activity_col = NULL,
     .ligand_expr_col = NULL,
     .receptor_expr_col = NULL,
+    .has_receptor = NULL,       # TRUE = 4-layer (S->L->R->T), FALSE = 3-layer (S->L->T)
     .flow_method = NULL,
     .node_color_mode = NULL,  # "cell_type" or "weighted_mix"
     .ligand_colors = NULL,    # Computed ligand colors (for weighted_mix mode)
@@ -459,9 +543,11 @@ SankeyPlot <- R6::R6Class(
     .cell_palette = NULL,
     .group_palette = NULL,
     .color_by = NULL,
+    .fixed_flow_color = NULL,
     .alpha = NULL,
     .node_thickness = NULL,
     .node_padding = NULL,
+    .arrangement = NULL,
     .orientation = NULL,
     .node_order = NULL,
     .highlight_pathway = NULL,
@@ -481,51 +567,134 @@ SankeyPlot <- R6::R6Class(
       receiver_col <- private$.receiver_col
 
       # Get unique values for each layer
-      senders <- private$.get_ordered_nodes("senders", unique(data[[sender_col]]))
-      ligands <- private$.get_ordered_nodes("ligands", unique(data[[ligand_col]]))
-      receptors <- private$.get_ordered_nodes("receptors", unique(data[[receptor_col]]))
-      receivers <- private$.get_ordered_nodes("receivers", unique(data[[receiver_col]]))
+      raw_senders <- unique(data[[sender_col]])
+      raw_ligands <- unique(data[[ligand_col]])
+      raw_receptors <- if (private$.has_receptor) unique(data[[receptor_col]]) else character(0)
+      raw_receivers <- unique(data[[receiver_col]])
+
+      has_custom_order <- !is.null(private$.node_order) && any(
+        !sapply(private$.node_order, is.null))
+
+      if (has_custom_order) {
+        # Custom order specified: use multi-pass barycenter + explicit positions
+        # Pass 1: Forward (left to right)
+        senders <- private$.order_layer("senders", raw_senders, NULL, data)
+        ligands <- private$.order_layer("ligands", raw_ligands, senders, data)
+
+        if (private$.has_receptor) {
+          receptors <- private$.order_layer("receptors", raw_receptors, ligands, data)
+          receivers <- private$.order_layer("receivers", raw_receivers, receptors, data)
+
+          # Pass 2: Reverse (right to left)
+          receptors <- private$.refine_order("receptors", receptors, receivers, data,
+                                              receptor_col, receiver_col)
+          ligands <- private$.refine_order("ligands", ligands, receptors, data,
+                                            ligand_col, receptor_col)
+
+          # Pass 3: Forward again
+          receptors <- private$.refine_order("receptors", receptors, ligands, data,
+                                              receptor_col, ligand_col)
+          receivers <- private$.refine_order("receivers", receivers, receptors, data,
+                                              receiver_col, receptor_col)
+        } else {
+          receptors <- character(0)
+          receivers <- private$.order_layer("receivers", raw_receivers, ligands, data)
+
+          # Pass 2: Reverse
+          ligands <- private$.refine_order("ligands", ligands, receivers, data,
+                                            ligand_col, receiver_col)
+
+          # Pass 3: Forward
+          receivers <- private$.refine_order("receivers", receivers, ligands, data,
+                                              receiver_col, ligand_col)
+        }
+      } else {
+        # No custom order: use data order; Plotly handles layout optimization
+        senders <- raw_senders
+        ligands <- raw_ligands
+        receptors <- raw_receptors
+        receivers <- raw_receivers
+      }
 
       # Build node list with layer prefixes to ensure uniqueness
-      node_labels <- c(
-        paste0("S:", senders),
-        paste0("L:", ligands),
-        paste0("R:", receptors),
-        paste0("T:", receivers)  # T for Target/receiver
-      )
+      if (private$.has_receptor) {
+        node_labels <- c(
+          paste0("S:", senders),
+          paste0("L:", ligands),
+          paste0("R:", receptors),
+          paste0("T:", receivers)
+        )
+      } else {
+        node_labels <- c(
+          paste0("S:", senders),
+          paste0("L:", ligands),
+          paste0("T:", receivers)
+        )
+      }
 
       # Create node index lookup
       node_idx <- setNames(seq_along(node_labels) - 1, node_labels)
 
-      # Calculate node positions (x coordinates for layers)
-      # Leave more space at edges for labels (15% on each side)
-      n_nodes <- length(node_labels)
-      node_x <- c(
-        rep(0.001, length(senders)),    # Senders at left edge
-        rep(0.333, length(ligands)),    # Ligands at 1/3
-        rep(0.666, length(receptors)),  # Receptors at 2/3
-        rep(0.999, length(receivers))   # Receivers at right edge
-      )
-
-      # Y positions - evenly distributed within each layer
-      node_y <- c(
-        seq(0.01, 0.99, length.out = max(length(senders), 2))[1:length(senders)],
-        seq(0.01, 0.99, length.out = max(length(ligands), 2))[1:length(ligands)],
-        seq(0.01, 0.99, length.out = max(length(receptors), 2))[1:length(receptors)],
-        seq(0.01, 0.99, length.out = max(length(receivers), 2))[1:length(receivers)]
-      )
-
       # Build links
       links <- private$.build_links(data, node_idx, senders, ligands, receptors, receivers)
+
+      # Only compute explicit x/y positions when custom order is specified.
+      # Otherwise, omit them so Plotly's layout engine handles positioning
+      # (minimizes crossings, especially in the L-R layer).
+      node_x <- NULL
+      node_y <- NULL
+
+      if (has_custom_order) {
+        if (private$.has_receptor) {
+          node_x <- c(
+            rep(0.001, length(senders)),
+            rep(0.333, length(ligands)),
+            rep(0.666, length(receptors)),
+            rep(0.999, length(receivers))
+          )
+          layer_nodes_list <- list(
+            paste0("S:", senders), paste0("L:", ligands),
+            paste0("R:", receptors), paste0("T:", receivers)
+          )
+        } else {
+          node_x <- c(
+            rep(0.001, length(senders)),
+            rep(0.5, length(ligands)),
+            rep(0.999, length(receivers))
+          )
+          layer_nodes_list <- list(
+            paste0("S:", senders), paste0("L:", ligands),
+            paste0("T:", receivers)
+          )
+        }
+
+        node_y <- private$.calculate_flow_y(
+          layer_nodes_list, links, node_idx
+        )
+
+        # Sort links by full flow path for consistent stacking at nodes
+        links <- private$.sort_links(links, node_y, data, node_idx)
+      }
 
       # Calculate node colors based on incoming link colors
       node_colors <- private$.calculate_node_colors(node_labels, links, node_idx)
 
+      # Apply highlighting to node colors and labels (dim non-highlighted nodes)
+      highlight_result <- private$.apply_node_highlight(node_colors, node_labels, data)
+      node_colors <- highlight_result$node_colors
+
       # Clean labels for display (remove prefixes)
-      display_labels <- gsub("^[SLRT]:", "", node_labels)
+      # If highlighting is active, use display_labels (non-highlighted = "")
+      all_labels <- gsub("^[SLRT]:", "", node_labels)
+      display_labels <- if (!is.null(highlight_result$display_labels)) {
+        highlight_result$display_labels
+      } else {
+        all_labels
+      }
 
       list(
         node_labels = display_labels,
+        node_hover_labels = all_labels,
         node_colors = node_colors,
         node_x = node_x,
         node_y = node_y,
@@ -536,7 +705,7 @@ SankeyPlot <- R6::R6Class(
       )
     },
 
-    # Get ordered nodes for a layer
+    # Get ordered nodes for a layer (custom order only)
     .get_ordered_nodes = function(layer, nodes) {
       if (!is.null(private$.node_order) && !is.null(private$.node_order[[layer]])) {
         custom_order <- private$.node_order[[layer]]
@@ -546,6 +715,205 @@ SankeyPlot <- R6::R6Class(
         return(ordered)
       }
       nodes
+    },
+
+    # Determine node order for a layer: custom order or barycenter optimization.
+    # Custom order (via sankey_order()) takes priority. When no custom order is
+    # specified, uses activity-weighted barycenter heuristic to minimize link crossings:
+    #   - First layer (senders): ordered by total activity (descending)
+    #   - Subsequent layers: ordered by weighted mean rank of connected previous-layer
+    #     nodes, where weights are the activity values of each connection
+    .order_layer = function(layer_type, nodes, prev_nodes, data) {
+      # Use custom order if specified by user
+      if (!is.null(private$.node_order) && !is.null(private$.node_order[[layer_type]])) {
+        return(private$.get_ordered_nodes(layer_type, nodes))
+      }
+
+      if (length(nodes) <= 1) return(nodes)
+
+      activity_col <- private$.activity_col
+      has_activity <- !is.null(activity_col) && activity_col %in% colnames(data)
+
+      # First layer (senders): order by total activity (descending),
+      # or alphabetically when no activity column is available
+      if (is.null(prev_nodes)) {
+        if (has_activity) {
+          sender_col <- private$.sender_col
+          total_act <- vapply(nodes, function(n) {
+            vals <- data[[activity_col]][data[[sender_col]] == n]
+            sum(abs(as.numeric(vals)), na.rm = TRUE)
+          }, numeric(1))
+          return(nodes[order(total_act, decreasing = TRUE)])
+        }
+        return(sort(nodes))
+      }
+
+      # Subsequent layers: activity-weighted barycenter of connected
+      # previous-layer nodes. Connections with higher activity pull the
+      # node closer to those positions than low-activity connections.
+      prev_rank <- setNames(seq_along(prev_nodes), prev_nodes)
+
+      if (private$.has_receptor) {
+        col_map <- list(
+          ligands = c(curr = private$.ligand_col, prev = private$.sender_col),
+          receptors = c(curr = private$.receptor_col, prev = private$.ligand_col),
+          receivers = c(curr = private$.receiver_col, prev = private$.receptor_col)
+        )
+      } else {
+        col_map <- list(
+          ligands = c(curr = private$.ligand_col, prev = private$.sender_col),
+          receivers = c(curr = private$.receiver_col, prev = private$.ligand_col)
+        )
+      }
+      cols <- col_map[[layer_type]]
+
+      barycenters <- vapply(nodes, function(n) {
+        mask <- data[[cols["curr"]]] == n
+        prev_vals <- data[[cols["prev"]]][mask]
+        prev_vals <- prev_vals[prev_vals %in% names(prev_rank)]
+        if (length(prev_vals) == 0) return(length(prev_nodes) / 2)
+
+        ranks <- prev_rank[prev_vals]
+
+        if (has_activity) {
+          weights <- abs(as.numeric(data[[activity_col]][mask]))
+          # Match weights to the filtered prev_vals
+          weights <- weights[data[[cols["prev"]]][mask] %in% names(prev_rank)]
+          weights[is.na(weights)] <- 1
+          weights <- pmax(weights, 1e-6)
+          return(sum(ranks * weights) / sum(weights))
+        }
+
+        mean(ranks)
+      }, numeric(1))
+
+      nodes[order(barycenters)]
+    },
+
+    # Refine node order using barycenter with an arbitrary reference layer.
+    # Used for reverse passes (right-to-left) and additional forward passes.
+    # Takes explicit column names so it works in either direction.
+    .refine_order = function(layer_type, nodes, ref_nodes, data, curr_col, ref_col) {
+      # Don't change layers with custom order
+      if (!is.null(private$.node_order) && !is.null(private$.node_order[[layer_type]])) {
+        return(nodes)
+      }
+      if (length(nodes) <= 1) return(nodes)
+
+      ref_rank <- setNames(seq_along(ref_nodes), ref_nodes)
+      activity_col <- private$.activity_col
+      has_activity <- !is.null(activity_col) && activity_col %in% colnames(data)
+
+      barycenters <- vapply(nodes, function(n) {
+        mask <- data[[curr_col]] == n
+        ref_vals <- data[[ref_col]][mask]
+        ref_vals <- ref_vals[ref_vals %in% names(ref_rank)]
+        if (length(ref_vals) == 0) return(length(ref_nodes) / 2)
+
+        ranks <- ref_rank[ref_vals]
+
+        if (has_activity) {
+          weights <- abs(as.numeric(data[[activity_col]][mask]))
+          weights <- weights[data[[ref_col]][mask] %in% names(ref_rank)]
+          weights[is.na(weights)] <- 1
+          weights <- pmax(weights, 1e-6)
+          return(sum(ranks * weights) / sum(weights))
+        }
+
+        mean(ranks)
+      }, numeric(1))
+
+      nodes[order(barycenters)]
+    },
+
+    # Calculate flow-proportional Y positions for each layer.
+    # Allocates vertical space proportional to total flow through each node,
+    # preventing overlap and producing a layout that respects node order.
+    .calculate_flow_y = function(layer_nodes_list, links, node_idx) {
+      all_y <- numeric(0)
+
+      for (layer_nodes in layer_nodes_list) {
+        n <- length(layer_nodes)
+
+        if (n == 0) next
+        if (n == 1) {
+          all_y <- c(all_y, 0.5)
+          next
+        }
+
+        # Total flow through each node (max of incoming, outgoing)
+        flows <- vapply(seq_along(layer_nodes), function(i) {
+          idx <- node_idx[[layer_nodes[i]]]
+          incoming <- sum(links$value[links$target == idx])
+          outgoing <- sum(links$value[links$source == idx])
+          max(incoming, outgoing)
+        }, numeric(1))
+
+        # Minimum flow for visibility (5% of max)
+        max_flow <- max(flows)
+        if (max_flow == 0) max_flow <- 1
+        flows <- pmax(flows, max_flow * 0.05)
+
+        # Normalize to get height fractions
+        total_flow <- sum(flows)
+        fractions <- flows / total_flow
+
+        # Layout in [0.01, 0.99] with proportional gaps
+        margin <- 0.01
+        available <- 1.0 - 2 * margin
+        pad_per_gap <- available * 0.03
+        total_pad <- pad_per_gap * (n - 1)
+        content <- available - total_pad
+
+        # If too many nodes, reduce padding to keep >= 50% for content
+        if (content < available * 0.5) {
+          pad_per_gap <- (available * 0.5) / max(n - 1, 1)
+          total_pad <- pad_per_gap * (n - 1)
+          content <- available - total_pad
+        }
+
+        # Node heights proportional to flow
+        heights <- fractions * content
+
+        # Y positions top-to-bottom
+        y_pos <- numeric(n)
+        current_y <- margin
+        for (i in seq_len(n)) {
+          y_pos[i] <- current_y + heights[i] / 2
+          current_y <- current_y + heights[i] + pad_per_gap
+        }
+
+        all_y <- c(all_y, y_pos)
+      }
+
+      all_y
+    },
+
+    # Sort links by the full flow path (sender_y, receiver_y) so that at
+    # every intermediate node (ligands, receptors), incoming and outgoing
+    # links are stacked in the same order. Without this, a flow entering
+    # near the top of a node can exit near the bottom, creating visual
+    # crossings inside the node bar.
+    .sort_links = function(links, node_y, data, node_idx) {
+      n <- length(links$source)
+      if (n <= 1) return(links)
+
+      sender_col <- private$.sender_col
+      receiver_col <- private$.receiver_col
+
+      # Look up sender_y and receiver_y for each link's originating data row
+      sender_y <- node_y[node_idx[paste0("S:", data[[sender_col]][links$row_id])] + 1]
+      receiver_y <- node_y[node_idx[paste0("T:", data[[receiver_col]][links$row_id])] + 1]
+
+      ord <- order(sender_y, receiver_y)
+
+      list(
+        source = links$source[ord],
+        target = links$target[ord],
+        value = links$value[ord],
+        colors = links$colors[ord],
+        row_id = links$row_id[ord]
+      )
     },
 
     # Build link data - dispatches to appropriate method based on flow_method
@@ -567,6 +935,7 @@ SankeyPlot <- R6::R6Class(
       receptor_col <- private$.receptor_col
       receiver_col <- private$.receiver_col
       activity_col <- private$.activity_col
+      has_receptor <- private$.has_receptor
 
       # --- Step 1: Compute Edge 1 (Sender -> Ligand) values ---
       edge1_values <- numeric(nrow(data))
@@ -602,26 +971,28 @@ SankeyPlot <- R6::R6Class(
         edge2_values[i] <- if (n_out > 0) total_in / n_out else 1
       }
 
-      # --- Step 4: Compute receptor total inflow and outgoing count ---
-      receptor_total_in <- list()
-      receptor_out_count <- list()
-      for (i in seq_len(nrow(data))) {
-        receptor <- data[[receptor_col]][i]
-        if (is.null(receptor_total_in[[receptor]])) {
-          receptor_total_in[[receptor]] <- 0
-          receptor_out_count[[receptor]] <- 0L
+      if (has_receptor) {
+        # --- Step 4: Compute receptor total inflow and outgoing count ---
+        receptor_total_in <- list()
+        receptor_out_count <- list()
+        for (i in seq_len(nrow(data))) {
+          receptor <- data[[receptor_col]][i]
+          if (is.null(receptor_total_in[[receptor]])) {
+            receptor_total_in[[receptor]] <- 0
+            receptor_out_count[[receptor]] <- 0L
+          }
+          receptor_total_in[[receptor]] <- receptor_total_in[[receptor]] + edge2_values[i]
+          receptor_out_count[[receptor]] <- receptor_out_count[[receptor]] + 1L
         }
-        receptor_total_in[[receptor]] <- receptor_total_in[[receptor]] + edge2_values[i]
-        receptor_out_count[[receptor]] <- receptor_out_count[[receptor]] + 1L
-      }
 
-      # --- Step 5: Compute Edge 3 values (equal split from receptor) ---
-      edge3_values <- numeric(nrow(data))
-      for (i in seq_len(nrow(data))) {
-        receptor <- data[[receptor_col]][i]
-        total_in <- receptor_total_in[[receptor]]
-        n_out <- receptor_out_count[[receptor]]
-        edge3_values[i] <- if (n_out > 0) total_in / n_out else 1
+        # --- Step 5: Compute Edge 3 values (equal split from receptor) ---
+        edge3_values <- numeric(nrow(data))
+        for (i in seq_len(nrow(data))) {
+          receptor <- data[[receptor_col]][i]
+          total_in <- receptor_total_in[[receptor]]
+          n_out <- receptor_out_count[[receptor]]
+          edge3_values[i] <- if (n_out > 0) total_in / n_out else 1
+        }
       }
 
       # --- Step 6: Build all edges ---
@@ -629,13 +1000,14 @@ SankeyPlot <- R6::R6Class(
       targets <- c()
       values <- c()
       colors <- c()
+      row_ids <- c()
 
       for (i in seq_len(nrow(data))) {
         row <- data[i, ]
         sender <- row[[sender_col]]
         ligand <- row[[ligand_col]]
-        receptor <- row[[receptor_col]]
         receiver <- row[[receiver_col]]
+        receptor <- if (has_receptor) row[[receptor_col]] else NULL
 
         # Get color for this flow
         flow_color <- private$.get_flow_color(row, i)
@@ -650,24 +1022,37 @@ SankeyPlot <- R6::R6Class(
         values <- c(values, edge1_values[i])
         colors <- c(colors, rgba_color)
 
-        # Edge 2: Ligand -> Receptor (equal split)
-        sources <- c(sources, node_idx[[paste0("L:", ligand)]])
-        targets <- c(targets, node_idx[[paste0("R:", receptor)]])
-        values <- c(values, edge2_values[i])
-        colors <- c(colors, rgba_color)
+        if (has_receptor) {
+          # Edge 2: Ligand -> Receptor (equal split)
+          sources <- c(sources, node_idx[[paste0("L:", ligand)]])
+          targets <- c(targets, node_idx[[paste0("R:", receptor)]])
+          values <- c(values, edge2_values[i])
+          colors <- c(colors, rgba_color)
 
-        # Edge 3: Receptor -> Receiver (equal split)
-        sources <- c(sources, node_idx[[paste0("R:", receptor)]])
-        targets <- c(targets, node_idx[[paste0("T:", receiver)]])
-        values <- c(values, edge3_values[i])
-        colors <- c(colors, rgba_color)
+          # Edge 3: Receptor -> Receiver (equal split)
+          sources <- c(sources, node_idx[[paste0("R:", receptor)]])
+          targets <- c(targets, node_idx[[paste0("T:", receiver)]])
+          values <- c(values, edge3_values[i])
+          colors <- c(colors, rgba_color)
+
+          row_ids <- c(row_ids, i, i, i)
+        } else {
+          # Edge 2: Ligand -> Receiver (equal split, skip receptor)
+          sources <- c(sources, node_idx[[paste0("L:", ligand)]])
+          targets <- c(targets, node_idx[[paste0("T:", receiver)]])
+          values <- c(values, edge2_values[i])
+          colors <- c(colors, rgba_color)
+
+          row_ids <- c(row_ids, i, i)
+        }
       }
 
       list(
         source = sources,
         target = targets,
         value = values,
-        colors = colors
+        colors = colors,
+        row_id = row_ids
       )
     },
 
@@ -677,6 +1062,9 @@ SankeyPlot <- R6::R6Class(
     # - Edge 2 (Ligand->Receptor): value = scaled_receptor_expression * ligand_total_in / weight_norm_sum
     # - Edge 3 (Receptor->Receiver): value = scaled_receptor_expression * receptor_total_in / weight_norm_sum
     .build_links_flow_conserving = function(data, node_idx, senders, ligands, receptors, receivers) {
+      if (!private$.has_receptor) {
+        stop("flow_conserving requires receptor column", call. = FALSE)
+      }
       sender_col <- private$.sender_col
       ligand_col <- private$.ligand_col
       receptor_col <- private$.receptor_col
@@ -686,26 +1074,61 @@ SankeyPlot <- R6::R6Class(
       receptor_expr_col <- private$.receptor_expr_col
 
       # Initialize link vectors
+      row_ids <- c()
       sources <- c()
       targets <- c()
       values <- c()
       colors <- c()
 
       # --- Step 1: Compute Edge 1 (Sender -> Ligand) values ---
-      # Value = scaled_activity (direct)
+      # Use ligand expression with per-sender normalization so that within
+      # each sender, relative edge weights to ligands reflect expression levels.
+      # Total outflow per sender is preserved at sum(scaled_activity).
+      has_ligand_expr <- !is.null(ligand_expr_col) && ligand_expr_col %in% colnames(data)
+      has_activity <- !is.null(activity_col) && activity_col %in% colnames(data)
+
+      # Step 1a: Collect per-(sender, ligand) expression and row counts
+      sender_ligand_info <- list()
+      sender_expr_sum <- list()
+      sender_total_activity <- list()
+
+      for (i in seq_len(nrow(data))) {
+        sender <- data[[sender_col]][i]
+        ligand <- data[[ligand_col]][i]
+        sl_key <- paste(sender, ligand, sep = "|||")
+
+        # Accumulate activity for sender total
+        act_val <- if (has_activity) as.numeric(data[[activity_col]][i]) else 1
+        if (is.na(act_val) || act_val <= 0) act_val <- 1
+        if (is.null(sender_total_activity[[sender]])) sender_total_activity[[sender]] <- 0
+        sender_total_activity[[sender]] <- sender_total_activity[[sender]] + act_val
+
+        # Track unique (sender, ligand) pairs
+        if (is.null(sender_ligand_info[[sl_key]])) {
+          lexpr <- if (has_ligand_expr) as.numeric(data[[ligand_expr_col]][i]) else 1
+          if (is.na(lexpr) || lexpr <= 0) lexpr <- 1e-4
+          sender_ligand_info[[sl_key]] <- list(expr = lexpr, nrows = 0L)
+
+          if (is.null(sender_expr_sum[[sender]])) sender_expr_sum[[sender]] <- 0
+          sender_expr_sum[[sender]] <- sender_expr_sum[[sender]] + lexpr
+        }
+        sender_ligand_info[[sl_key]]$nrows <- sender_ligand_info[[sl_key]]$nrows + 1L
+      }
+
+      # Step 1b: Compute per-row Edge 1 values
+      # Visual total from sender S to ligand L = (expr / sender_expr_sum) * sender_total
+      # Per-row value divides by n_rows for that (S, L) pair
       edge1_values <- list()
       for (i in seq_len(nrow(data))) {
-        row <- data[i, ]
-        sender <- row[[sender_col]]
-        ligand <- row[[ligand_col]]
+        sender <- data[[sender_col]][i]
+        ligand <- data[[ligand_col]][i]
+        sl_key <- paste(sender, ligand, sep = "|||")
 
-        # Get scaled_activity value
-        value <- if (!is.null(activity_col) && activity_col %in% colnames(data)) {
-          as.numeric(row[[activity_col]])
-        } else {
-          1
-        }
-        if (is.na(value) || value <= 0) value <- 1  # Default edge weight
+        info <- sender_ligand_info[[sl_key]]
+        expr_sum <- sender_expr_sum[[sender]]
+        total_act <- sender_total_activity[[sender]]
+
+        value <- (info$expr / expr_sum) * total_act / info$nrows
 
         key <- paste(sender, ligand, i, sep = "|||")
         edge1_values[[key]] <- value
@@ -765,11 +1188,11 @@ SankeyPlot <- R6::R6Class(
 
         # Compute normalized edge value
         edge2_val <- if (is.null(total_in) || is.null(weight_sum) || weight_sum == 0) {
-          1  # Default edge weight
+          1e-6  # Minimal edge weight (preserves flow conservation)
         } else {
           receptor_expr * total_in / weight_sum
         }
-        if (edge2_val <= 0) edge2_val <- 1  # Default edge weight
+        if (edge2_val <= 0) edge2_val <- 1e-6  # Minimal edge weight (preserves flow conservation)
 
         key <- paste(ligand, receptor, i, sep = "|||")
         edge2_values[[key]] <- edge2_val
@@ -846,29 +1269,37 @@ SankeyPlot <- R6::R6Class(
         weight_sum <- receptor_weight_norm_sum[[receptor]]
 
         edge3_val <- if (is.null(total_in) || is.null(weight_sum) || weight_sum == 0) {
-          1  # Default edge weight
+          1e-6  # Minimal edge weight (preserves flow conservation)
         } else {
           receptor_expr * total_in / weight_sum
         }
-        if (edge3_val <= 0) edge3_val <- 1  # Default edge weight
+        if (edge3_val <= 0) edge3_val <- 1e-6  # Minimal edge weight (preserves flow conservation)
 
         sources <- c(sources, node_idx[[paste0("R:", receptor)]])
         targets <- c(targets, node_idx[[paste0("T:", receiver)]])
         values <- c(values, edge3_val)
         colors <- c(colors, rgba_color)
+
+        # Track data row for each link (3 links per row)
+        row_ids <- c(row_ids, i, i, i)
       }
 
       list(
         source = sources,
         target = targets,
         value = values,
-        colors = colors
+        colors = colors,
+        row_id = row_ids
       )
     },
 
     # Get color for a flow based on coloring strategy
     .get_flow_color = function(row, idx) {
       color_by <- private$.color_by
+
+      if (color_by == "fixed") {
+        return(private$.fixed_flow_color)
+      }
 
       if (color_by == "sender") {
         sender <- row[[private$.sender_col]]
@@ -926,7 +1357,8 @@ SankeyPlot <- R6::R6Class(
       if (!is.null(highlight$ligands) && !(ligand %in% highlight$ligands)) {
         matches <- FALSE
       }
-      if (!is.null(highlight$receptors) && !(receptor %in% highlight$receptors)) {
+      if (!is.null(highlight$receptors) && private$.has_receptor &&
+          !(receptor %in% highlight$receptors)) {
         matches <- FALSE
       }
       if (!is.null(highlight$receivers) && !(receiver %in% highlight$receivers)) {
@@ -938,6 +1370,79 @@ SankeyPlot <- R6::R6Class(
       } else {
         return(private$.highlight_alpha)
       }
+    },
+
+    # Apply highlighting to node colors and labels
+    # Nodes connected to at least one highlighted flow stay opaque with visible labels;
+    # all other nodes get dim_alpha and their labels are hidden (shown on hover)
+    .apply_node_highlight = function(node_colors, node_labels, data) {
+      highlight <- private$.highlight_pathway
+      if (is.null(highlight)) {
+        return(list(node_colors = node_colors, display_labels = NULL))
+      }
+
+      sender_col <- private$.sender_col
+      ligand_col <- private$.ligand_col
+      receptor_col <- private$.receptor_col
+      receiver_col <- private$.receiver_col
+      has_receptor <- private$.has_receptor
+      dim_alpha <- private$.highlight_alpha
+
+      # Determine which rows (flows) match the highlight criteria
+      highlighted_senders <- character(0)
+      highlighted_ligands <- character(0)
+      highlighted_receptors <- character(0)
+      highlighted_receivers <- character(0)
+
+      for (i in seq_len(nrow(data))) {
+        sender <- data[[sender_col]][i]
+        ligand <- data[[ligand_col]][i]
+        receptor <- if (has_receptor) data[[receptor_col]][i] else NULL
+        receiver <- data[[receiver_col]][i]
+
+        matches <- TRUE
+        if (!is.null(highlight$senders) && !(sender %in% highlight$senders)) matches <- FALSE
+        if (!is.null(highlight$ligands) && !(ligand %in% highlight$ligands)) matches <- FALSE
+        if (!is.null(highlight$receptors) && has_receptor &&
+            !(receptor %in% highlight$receptors)) matches <- FALSE
+        if (!is.null(highlight$receivers) && !(receiver %in% highlight$receivers)) matches <- FALSE
+
+        if (matches) {
+          highlighted_senders <- c(highlighted_senders, sender)
+          highlighted_ligands <- c(highlighted_ligands, ligand)
+          if (has_receptor) highlighted_receptors <- c(highlighted_receptors, receptor)
+          highlighted_receivers <- c(highlighted_receivers, receiver)
+        }
+      }
+
+      highlighted_senders <- unique(highlighted_senders)
+      highlighted_ligands <- unique(highlighted_ligands)
+      highlighted_receptors <- unique(highlighted_receptors)
+      highlighted_receivers <- unique(highlighted_receivers)
+
+      # Build display labels: highlighted nodes keep their label,
+      # non-highlighted nodes get empty string (name still visible on hover)
+      display_labels <- character(length(node_labels))
+      for (i in seq_along(node_labels)) {
+        label <- node_labels[i]
+        name <- gsub("^[SLRT]:", "", label)
+        is_highlighted <- FALSE
+
+        if (grepl("^S:", label) && name %in% highlighted_senders) is_highlighted <- TRUE
+        if (grepl("^L:", label) && name %in% highlighted_ligands) is_highlighted <- TRUE
+        if (grepl("^R:", label) && name %in% highlighted_receptors) is_highlighted <- TRUE
+        if (grepl("^T:", label) && name %in% highlighted_receivers) is_highlighted <- TRUE
+
+        display_labels[i] <- name
+        if (!is_highlighted) {
+          # Receiver nodes keep their colors even when not highlighted
+          if (!grepl("^T:", label)) {
+            node_colors[i] <- hex_with_alpha(node_colors[i], dim_alpha)
+          }
+        }
+      }
+
+      list(node_colors = node_colors, display_labels = display_labels)
     },
 
     # Calculate node colors based on incoming links or pre-computed weighted colors
@@ -973,13 +1478,13 @@ SankeyPlot <- R6::R6Class(
               node_colors[i] <- ccflow_settings()$fallback_color()
             }
           } else {
-            # Default: use incoming link colors
+            # Default (cell_type): use the dominant incoming link color
+            # (the color with the highest total flow weight)
             node_key <- i - 1
             incoming_idx <- which(links$target == node_key)
             if (length(incoming_idx) > 0) {
-              incoming_colors <- private$.extract_hex_from_rgba(links$colors[incoming_idx])
-              incoming_weights <- links$value[incoming_idx]
-              node_colors[i] <- weighted_mix_colors(incoming_colors, incoming_weights)
+              node_colors[i] <- private$.dominant_link_color(
+                links$colors[incoming_idx], links$value[incoming_idx])
             }
           }
           next
@@ -996,13 +1501,12 @@ SankeyPlot <- R6::R6Class(
               node_colors[i] <- ccflow_settings()$fallback_color()
             }
           } else {
-            # Default: use incoming link colors
+            # Default (cell_type): use the dominant incoming link color
             node_key <- i - 1
             incoming_idx <- which(links$target == node_key)
             if (length(incoming_idx) > 0) {
-              incoming_colors <- private$.extract_hex_from_rgba(links$colors[incoming_idx])
-              incoming_weights <- links$value[incoming_idx]
-              node_colors[i] <- weighted_mix_colors(incoming_colors, incoming_weights)
+              node_colors[i] <- private$.dominant_link_color(
+                links$colors[incoming_idx], links$value[incoming_idx])
             }
           }
           next
@@ -1010,6 +1514,19 @@ SankeyPlot <- R6::R6Class(
       }
 
       node_colors
+    },
+
+    # Get the dominant (highest-weight) link color as a solid hex color.
+    # Used for cell_type mode: ligand/receptor nodes show the color of
+    # the strongest incoming connection rather than a blended mix.
+    .dominant_link_color = function(link_colors, link_weights) {
+      hex_colors <- private$.extract_hex_from_rgba(link_colors)
+      # Aggregate weights per unique color
+      unique_colors <- unique(hex_colors)
+      total_weights <- vapply(unique_colors, function(col) {
+        sum(link_weights[hex_colors == col])
+      }, numeric(1))
+      unique_colors[which.max(total_weights)]
     },
 
     # Extract hex color from rgba string
@@ -1083,6 +1600,11 @@ SankeyPlot <- R6::R6Class(
       }
       private$.ligand_colors <- ligand_colors
 
+      # Skip receptor colors if no receptor layer
+      if (!private$.has_receptor) {
+        return(invisible(NULL))
+      }
+
       # --- Compute receptor colors ---
       # Group by (receptor, ligand), sum scaled_receptor_expression
       receptor_ligand_weights <- list()
@@ -1147,10 +1669,13 @@ SankeyPlot <- R6::R6Class(
       base_alpha <- private$.alpha
       dim_alpha <- 0.08  # Alpha for non-matching pathways
 
+      has_receptor <- private$.has_receptor
+      links_per_row <- if (has_receptor) 3L else 2L
+
       # Get unique values for each category
       senders <- unique(data[[sender_col]])
       ligands <- unique(data[[ligand_col]])
-      receptors <- unique(data[[receptor_col]])
+      receptors <- if (has_receptor) unique(data[[receptor_col]]) else character(0)
       receivers <- unique(data[[receiver_col]])
 
       # Helper function to dim a color (set alpha to dim_alpha)
@@ -1203,12 +1728,12 @@ SankeyPlot <- R6::R6Class(
             mask <- data[[receiver_col]] == val
           }
 
-          # Get indices of matching rows (each row creates 3 links)
+          # Get indices of matching rows
           row_indices <- which(mask)
 
           # Calculate link indices for matching rows
           matching_link_indices <- unlist(lapply(row_indices, function(i) {
-            c((i - 1) * 3 + 1, (i - 1) * 3 + 2, (i - 1) * 3 + 3)
+            seq((i - 1) * links_per_row + 1, (i - 1) * links_per_row + links_per_row)
           }))
 
           # Create new color array: dim non-matching, highlight matching
@@ -1237,59 +1762,34 @@ SankeyPlot <- R6::R6Class(
       # Create dropdown menus
       sender_buttons <- create_highlight_buttons(senders, "sender")
 
-      updatemenus <- list(
-        # Sender dropdown
+      if (has_receptor) {
+        # 4 dropdowns: sender, ligand, receptor, receiver
+        dropdown_x <- c(0.0, 0.25, 0.5, 0.75)
+        dropdown_labels <- c("Sender:", "Ligand:", "Receptor:", "Receiver:")
+        dropdown_buttons <- list(
+          sender_buttons,
+          create_highlight_buttons(ligands, "ligand"),
+          create_highlight_buttons(receptors, "receptor"),
+          create_highlight_buttons(receivers, "receiver")
+        )
+      } else {
+        # 3 dropdowns: sender, ligand, receiver
+        dropdown_x <- c(0.0, 0.33, 0.66)
+        dropdown_labels <- c("Sender:", "Ligand:", "Receiver:")
+        dropdown_buttons <- list(
+          sender_buttons,
+          create_highlight_buttons(ligands, "ligand"),
+          create_highlight_buttons(receivers, "receiver")
+        )
+      }
+
+      updatemenus <- lapply(seq_along(dropdown_x), function(j) {
         list(
           active = 0,
-          buttons = sender_buttons,
+          buttons = dropdown_buttons[[j]],
           direction = "down",
           showactive = TRUE,
-          x = 0.0,
-          xanchor = "left",
-          y = 1.18,
-          yanchor = "top",
-          pad = list(r = 10, t = 10),
-          bgcolor = "white",
-          bordercolor = "#cccccc",
-          font = list(size = 11)
-        ),
-        # Ligand dropdown
-        list(
-          active = 0,
-          buttons = create_highlight_buttons(ligands, "ligand"),
-          direction = "down",
-          showactive = TRUE,
-          x = 0.25,
-          xanchor = "left",
-          y = 1.18,
-          yanchor = "top",
-          pad = list(r = 10, t = 10),
-          bgcolor = "white",
-          bordercolor = "#cccccc",
-          font = list(size = 11)
-        ),
-        # Receptor dropdown
-        list(
-          active = 0,
-          buttons = create_highlight_buttons(receptors, "receptor"),
-          direction = "down",
-          showactive = TRUE,
-          x = 0.5,
-          xanchor = "left",
-          y = 1.18,
-          yanchor = "top",
-          pad = list(r = 10, t = 10),
-          bgcolor = "white",
-          bordercolor = "#cccccc",
-          font = list(size = 11)
-        ),
-        # Receiver dropdown
-        list(
-          active = 0,
-          buttons = create_highlight_buttons(receivers, "receiver"),
-          direction = "down",
-          showactive = TRUE,
-          x = 0.75,
+          x = dropdown_x[j],
           xanchor = "left",
           y = 1.18,
           yanchor = "top",
@@ -1298,46 +1798,13 @@ SankeyPlot <- R6::R6Class(
           bordercolor = "#cccccc",
           font = list(size = 11)
         )
-      )
+      })
 
       # Add annotations for dropdown labels
-      annotations <- list(
+      annotations <- lapply(seq_along(dropdown_x), function(j) {
         list(
-          text = "Sender:",
-          x = 0.0,
-          y = 1.25,
-          xref = "paper",
-          yref = "paper",
-          xanchor = "left",
-          yanchor = "bottom",
-          showarrow = FALSE,
-          font = list(size = 12, color = "#333333")
-        ),
-        list(
-          text = "Ligand:",
-          x = 0.25,
-          y = 1.25,
-          xref = "paper",
-          yref = "paper",
-          xanchor = "left",
-          yanchor = "bottom",
-          showarrow = FALSE,
-          font = list(size = 12, color = "#333333")
-        ),
-        list(
-          text = "Receptor:",
-          x = 0.5,
-          y = 1.25,
-          xref = "paper",
-          yref = "paper",
-          xanchor = "left",
-          yanchor = "bottom",
-          showarrow = FALSE,
-          font = list(size = 12, color = "#333333")
-        ),
-        list(
-          text = "Receiver:",
-          x = 0.75,
+          text = dropdown_labels[j],
+          x = dropdown_x[j],
           y = 1.25,
           xref = "paper",
           yref = "paper",
@@ -1346,7 +1813,7 @@ SankeyPlot <- R6::R6Class(
           showarrow = FALSE,
           font = list(size = 12, color = "#333333")
         )
-      )
+      })
 
       # Apply to figure with extra top margin for dropdowns
       fig <- plotly::layout(
@@ -1370,7 +1837,9 @@ SankeyPlot <- R6::R6Class(
 #' @param data Data frame with communication data. Supports both NicheNet and
 #'   MultiNicheNet output formats. MultiNicheNet columns are automatically mapped.
 #' @param cell_colors Named list/vector of cell type colors
-#' @param color_by Coloring strategy: "sender", "receiver", "ligand", or "condition"
+#' @param color_by Coloring strategy: "sender", "receiver", "ligand", "condition",
+#'   or any valid color string (e.g., "steelblue", "#3498db") to use a single
+#'   fixed color for all flows.
 #' @param title Plot title
 #' @param width Plot width
 #' @param height Plot height
@@ -1393,6 +1862,9 @@ SankeyPlot <- R6::R6Class(
 #'       weighted by scaled_receptor_expression. Creates a visual color flow through the network.
 #'   }
 #' @param interactive Enable interactive filter dropdowns (default: FALSE)
+#' @param receptor_col Name of the receptor column. Set to NULL to omit
+#'   the receptor layer (3-layer plot: sender -> ligand -> receiver).
+#'   Default: "receptor".
 #' @param ... Additional arguments passed to SankeyPlot$new()
 #'
 #' @return Plotly figure object
@@ -1432,17 +1904,23 @@ sankey_flow <- function(data,
                         height = NULL,
                         alpha = 0.65,
                         label_size = 16,
-                        label_position = "right",
+                        label_position = NULL,
                         flow_method = c("flow_conserving", "uniform"),
                         node_color_mode = c("cell_type", "weighted_mix"),
                         interactive = FALSE,
+                        receptor_col = "receptor",
                         ...) {
 
+  flow_explicit <- !missing(flow_method)
   flow_method <- match.arg(flow_method)
   node_color_mode <- match.arg(node_color_mode)
 
-  plot <- SankeyPlot$new(data, cell_colors, width = width, height = height,
-                          flow_method = flow_method, ...)
+  args <- list(data = data, cell_colors = cell_colors, width = width,
+               height = height, receptor_col = receptor_col)
+  if (flow_explicit) args$flow_method <- flow_method
+  extra <- list(...)
+  if (length(extra) > 0) args <- c(args, extra)
+  plot <- do.call(SankeyPlot$new, args)
 
   plot$colors(color_by = color_by)
   plot$alpha(alpha)

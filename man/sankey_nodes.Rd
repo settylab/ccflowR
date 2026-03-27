@@ -4,7 +4,7 @@
 \alias{sankey_nodes}
 \title{Configure Node Appearance}
 \usage{
-sankey_nodes(thickness = NULL, padding = NULL)
+sankey_nodes(thickness = NULL, padding = NULL, arrangement = NULL)
 }
 \arguments{
 \item{thickness}{Node thickness in pixels. Default: 20. Range: 5-50.
@@ -12,6 +12,10 @@ Thicker nodes are more prominent but take more space.}
 
 \item{padding}{Vertical padding between nodes in pixels. Default: 30. Range: 10-100.
 More padding spreads nodes apart; less padding creates a denser layout.}
+
+\item{arrangement}{Plotly arrangement mode. Default: "fixed" (node order is
+locked, ensuring reproducible layouts). Use "snap" to allow interactive
+dragging of nodes in the browser.}
 }
 \value{
 A sankey_layer object
@@ -27,4 +31,7 @@ sankey_plot(ex$data, ex$colors) + sankey_nodes(thickness = 30, padding = 45)
 
 # Compact layout
 sankey_plot(ex$data, ex$colors) + sankey_nodes(thickness = 12, padding = 15)
+
+# Enable interactive node dragging
+sankey_plot(ex$data, ex$colors) + sankey_nodes(arrangement = "snap")
 }

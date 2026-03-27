@@ -9,6 +9,7 @@ sankey_plot(
   colors = NULL,
   group_colors = NULL,
   group_col = NULL,
+  receptor_col = "receptor",
   flow = c("flow_conserving", "uniform"),
   ...
 )
@@ -19,7 +20,8 @@ sankey_plot(
 \item{sender}{Character. Sending cell type name.}
 \item{receiver}{Character. Receiving cell type name.}
 \item{ligand}{Character. Ligand gene symbol.}
-\item{receptor}{Character. Receptor gene symbol.}
+\item{receptor}{Character. (Optional) Receptor gene symbol. If absent and
+\code{receptor_col = NULL}, a 3-layer plot (sender -> ligand -> receiver) is created.}
 \item{scaled_activity}{Numeric. (Optional) Activity score for flow-conserving mode.
 If not provided with other expression columns, falls back to uniform mode.
 }
@@ -34,6 +36,10 @@ Only needed when using \code{sankey_colors(by = "group")}.}
 
 \item{group_col}{Name of the column containing group/condition labels.
 Required for group-based coloring.}
+
+\item{receptor_col}{Name of the receptor column in the data. Set to NULL to omit
+the receptor layer, creating a 3-layer Sankey plot (sender -> ligand -> receiver).
+Default: "receptor".}
 
 \item{flow}{Character. Edge weight computation method:
 \describe{

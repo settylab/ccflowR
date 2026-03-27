@@ -136,7 +136,30 @@ to_image <- function(fig, filename, format = "png", width = NULL, height = NULL,
       # Try to find Python with kaleido in common locations
       python_path <- Sys.getenv("RETICULATE_PYTHON", "")
 
-      # If not set, try common conda/micromamba locations
+      # If not set, try to derive from the current R installation's conda prefix.
+      # When R runs inside a conda/micromamba environment, R.home() is typically
+      # <conda_prefix>/lib/R. The sibling bin/python is the environment's Python.
+      if (!nzchar(python_path) || !file.exists(python_path)) {
+        r_home <- R.home()
+        r_conda_prefix <- dirname(dirname(r_home))  # <prefix>/lib/R -> <prefix>
+        candidate <- file.path(r_conda_prefix, "bin", "python")
+        if (file.exists(candidate)) {
+          python_path <- candidate
+        }
+      }
+
+      # Try Sys.which() to find python in PATH
+      if (!nzchar(python_path) || !file.exists(python_path)) {
+        for (py_name in c("python3", "python")) {
+          candidate <- unname(Sys.which(py_name))
+          if (nzchar(candidate) && file.exists(candidate)) {
+            python_path <- candidate
+            break
+          }
+        }
+      }
+
+      # If still not found, search common conda/micromamba locations
       if (!nzchar(python_path) || !file.exists(python_path)) {
         conda_prefixes <- c(
           Sys.getenv("CONDA_PREFIX", ""),

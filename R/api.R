@@ -23,7 +23,8 @@ NULL
 #'     \item{sender}{Character. Sending cell type name.}
 #'     \item{receiver}{Character. Receiving cell type name.}
 #'     \item{ligand}{Character. Ligand gene symbol.}
-#'     \item{receptor}{Character. Receptor gene symbol.}
+#'     \item{receptor}{Character. (Optional) Receptor gene symbol. If absent and
+#'       `receptor_col = NULL`, a 3-layer plot (sender -> ligand -> receiver) is created.}
 #'     \item{scaled_activity}{Numeric. (Optional) Activity score for flow-conserving mode.
 #'       If not provided with other expression columns, falls back to uniform mode.
 #'     }
@@ -35,6 +36,9 @@ NULL
 #'   Only needed when using `sankey_colors(by = "group")`.
 #' @param group_col Name of the column containing group/condition labels.
 #'   Required for group-based coloring.
+#' @param receptor_col Name of the receptor column in the data. Set to NULL to omit
+#'   the receptor layer, creating a 3-layer Sankey plot (sender -> ligand -> receiver).
+#'   Default: "receptor".
 #' @param flow Character. Edge weight computation method:
 #'   \describe{
 #'     \item{"flow_conserving"}{(Default) Edge weights based on expression values.
@@ -77,20 +81,26 @@ sankey_plot <- function(data,
                         colors = NULL,
                         group_colors = NULL,
                         group_col = NULL,
+                        receptor_col = "receptor",
                         flow = c("flow_conserving", "uniform"),
                         ...) {
 
+  flow_explicit <- !missing(flow)
   flow <- match.arg(flow)
 
-  # Create internal R6 object
-  internal <- SankeyPlot$new(
+  # Create internal R6 object - only pass flow_method explicitly when user specified it
+  args <- list(
     data = data,
     cell_colors = colors,
     group_colors = group_colors,
     group_col = group_col,
-    flow_method = flow,
+    receptor_col = receptor_col,
     ...
   )
+  if (flow_explicit) {
+    args$flow_method <- flow
+  }
+  internal <- do.call(SankeyPlot$new, args)
 
   # Wrap in S3 class
   structure(
@@ -254,6 +264,8 @@ summary.sankey <- function(object, ...) {
 #'     \item{"condition"}{Color by experimental condition/group. Uses group colors when
 #'       `group_col` is set in `sankey_plot()`; falls back to sender coloring otherwise.}
 #'   }
+#'   Alternatively, pass any valid color string (e.g., `"steelblue"`, `"#3498db"`)
+#'   to use a single fixed color for all flows.
 #' @param binary_color Deprecated. Ignored.
 #'
 #' @return A sankey_layer object
@@ -284,7 +296,13 @@ sankey_colors <- function(by = c("sender", "receiver", "ligand", "condition"),
   if (!is.null(by) && length(by) == 1 && by == "group") {
     by <- "condition"
   }
-  by <- match.arg(by)
+  # Check if by is a named strategy or a fixed color
+  strategies <- c("sender", "receiver", "ligand", "condition")
+  if (!(length(by) > 1 || by %in% strategies)) {
+    # Fixed color string — pass through as-is
+  } else {
+    by <- match.arg(by)
+  }
 
   if (!is.null(binary_color)) {
     warning("The binary_color parameter is deprecated and ignored.", call. = FALSE)
@@ -458,6 +476,9 @@ sankey_unhighlight <- function() {
 #'   Thicker nodes are more prominent but take more space.
 #' @param padding Vertical padding between nodes in pixels. Default: 30. Range: 10-100.
 #'   More padding spreads nodes apart; less padding creates a denser layout.
+#' @param arrangement Plotly arrangement mode. Default: "fixed" (node order is
+#'   locked, ensuring reproducible layouts). Use "snap" to allow interactive
+#'   dragging of nodes in the browser.
 #'
 #' @return A sankey_layer object
 #' @export
@@ -470,12 +491,16 @@ sankey_unhighlight <- function() {
 #'
 #' # Compact layout
 #' sankey_plot(ex$data, ex$colors) + sankey_nodes(thickness = 12, padding = 15)
-sankey_nodes <- function(thickness = NULL, padding = NULL) {
+#'
+#' # Enable interactive node dragging
+#' sankey_plot(ex$data, ex$colors) + sankey_nodes(arrangement = "snap")
+sankey_nodes <- function(thickness = NULL, padding = NULL, arrangement = NULL) {
   structure(
     list(
       type = "nodes",
       thickness = thickness,
-      padding = padding
+      padding = padding,
+      arrangement = arrangement
     ),
     class = "sankey_layer"
   )
@@ -486,7 +511,8 @@ sankey_nodes <- function(thickness = NULL, padding = NULL) {
 #'
 #' @description
 #' Control the vertical order of nodes within each layer. By default, nodes are
-#' ordered by their first appearance in the data.
+#' ordered using an activity-weighted barycenter heuristic to minimize link
+#' crossings. Use this function to override with a custom order.
 #'
 #' @param senders Character vector specifying order of sender nodes (top to bottom).
 #' @param ligands Character vector specifying order of ligand nodes.
@@ -869,7 +895,8 @@ apply_layer <- function(plot, layer) {
       internal$clear_highlight()
     },
     nodes = {
-      internal$nodes(thickness = layer$thickness, padding = layer$padding)
+      internal$nodes(thickness = layer$thickness, padding = layer$padding,
+                     arrangement = layer$arrangement)
     },
     order = {
       internal$node_order(
@@ -968,6 +995,47 @@ sankey_save <- function(plot, filename, width = NULL, height = NULL, scale = 1) 
   )
 
   invisible(plot)
+}
+
+
+#' Save a Sankey Plot as PDF
+#'
+#' @description
+#' Convenience wrapper for saving a sankey plot as a PDF file.
+#' PDF export is not supported by the browser-based camera icon (Plotly.js
+#' limitation), so use this function instead.
+#'
+#' @param plot A sankey object created by `sankey_plot()`
+#' @param filename Output PDF filename. The `.pdf` extension is added
+#'   automatically if not present.
+#' @param width Width in pixels. Default: uses plot's current width.
+#' @param height Height in pixels. Default: uses plot's current height.
+#' @param scale Scale factor for resolution. Default: 1.
+#'
+#' @return The sankey object invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' ex <- example_communication()
+#' p <- sankey_plot(ex$data, ex$colors)
+#'
+#' # Quick PDF export
+#' # sankey_pdf(p, "figure.pdf")
+#'
+#' # With custom dimensions
+#' # sankey_pdf(p, "figure.pdf", width = 800, height = 600)
+sankey_pdf <- function(plot, filename = "sankey_plot.pdf", width = NULL, height = NULL, scale = 1) {
+  if (!inherits(plot, "sankey")) {
+    stop("plot must be a sankey object created by sankey_plot()", call. = FALSE)
+  }
+
+  # Ensure .pdf extension
+  if (!grepl("\\.pdf$", filename, ignore.case = TRUE)) {
+    filename <- paste0(filename, ".pdf")
+  }
+
+  sankey_save(plot, filename, width = width, height = height, scale = scale)
 }
 
 

@@ -18,15 +18,27 @@ NULL
 #' hex_to_rgb("#FF0000")
 #' hex_to_rgb("00FF00")
 hex_to_rgb <- function(hex) {
-  # Remove # if present
-  hex <- gsub("^#", "", hex)
-
-  # Parse RGB values
-  r <- strtoi(substr(hex, 1, 2), base = 16)
-  g <- strtoi(substr(hex, 3, 4), base = 16)
-  b <- strtoi(substr(hex, 5, 6), base = 16)
-
-  c(r = r, g = g, b = b)
+  # Use col2rgb which handles hex, named colors ("red"), and 8-char hex with alpha
+  rgb_mat <- tryCatch(
+    grDevices::col2rgb(hex),
+    error = function(e) {
+      # Fallback: try parsing as raw hex (e.g. "FFF" without #)
+      hex_clean <- gsub("^#", "", hex)
+      if (nchar(hex_clean) == 3) {
+        # Expand shorthand (FFF -> FFFFFF)
+        hex_clean <- paste0(
+          substr(hex_clean, 1, 1), substr(hex_clean, 1, 1),
+          substr(hex_clean, 2, 2), substr(hex_clean, 2, 2),
+          substr(hex_clean, 3, 3), substr(hex_clean, 3, 3)
+        )
+      }
+      r <- strtoi(substr(hex_clean, 1, 2), base = 16)
+      g <- strtoi(substr(hex_clean, 3, 4), base = 16)
+      b <- strtoi(substr(hex_clean, 5, 6), base = 16)
+      matrix(c(r, g, b), nrow = 3, dimnames = list(c("red", "green", "blue"), NULL))
+    }
+  )
+  c(r = unname(rgb_mat[1, 1]), g = unname(rgb_mat[2, 1]), b = unname(rgb_mat[3, 1]))
 }
 
 #' Convert RGB to Hex Color

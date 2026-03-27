@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Optional receptor layer (3-layer Sankey plots)**: Set `receptor_col = NULL` in `sankey_plot()` or `sankey_flow()` to omit the receptor layer, creating a 3-layer Sankey diagram (sender -> ligand -> receiver). Flow method automatically falls back to "uniform" in 3-layer mode. Interactive dropdowns, highlighting, custom ordering, and node coloring all adapt to the reduced layout. Warnings are issued if receptor-specific arguments (e.g., `sankey_order(receptors = ...)` or `sankey_highlight(receptors = ...)`) are used in 3-layer mode.
+
 ### Removed
 - **`sankey_style()` and all style presets**: Removed `sankey_style()`, `list_styles()`, `get_sankey_style()`, `SankeyStyle`, and `TextStyle` entirely. Use `sankey_font()`, `sankey_nodes()`, `sankey_alpha()`, and `sankey_background()` directly for customization.
 
 ### Changed
+- **Flow-proportional node layout with barycenter ordering**: Replaced even-spacing y-positions with flow-proportional positioning that allocates vertical space based on each node's total flow. Default node ordering now uses an activity-weighted barycenter heuristic to minimize link crossings (senders ordered by total activity, subsequent layers by weighted mean rank of connected previous-layer nodes). Custom order via `sankey_order()` is still respected and takes priority. The Plotly arrangement mode is now `"fixed"` by default (was `"snap"`) to ensure node order is preserved; use `sankey_nodes(arrangement = "snap")` to re-enable interactive dragging.
 - **`sankey_colors(by = "binary")` replaced with `by = "condition"`**: The "condition" strategy colors flows by the group/condition column (e.g., Control vs Treatment). When no group column is present, falls back to sender coloring. The old `"binary"` and `"group"` values are accepted with deprecation warnings.
 - **Uniform edge weight algorithm**: Uniform mode now uses equal redistribution at shared ligand/receptor nodes instead of assigning the same value to all edges. This makes uniform and flow-conserving modes visually distinguishable — uniform splits flow equally at branching points, while flow-conserving splits proportionally by expression.
 - **Example data decorrelated**: `example_communication()` receptor expression values are now decorrelated from activity values, making the difference between uniform and flow-conserving modes visible.

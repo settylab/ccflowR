@@ -4,7 +4,7 @@
 \alias{validate_sankey_input}
 \title{Validate Sankey Input Data}
 \usage{
-validate_sankey_input(data, require_weights = FALSE)
+validate_sankey_input(data, require_weights = FALSE, warn = TRUE)
 }
 \arguments{
 \item{data}{A data frame with communication data}

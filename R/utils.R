@@ -450,7 +450,7 @@ detect_framework <- function(data) {
 #' df <- data.frame(sender = "A", receiver = "B", ligand = "L1", receptor = "R1")
 #' validate_sankey_input(df)  # TRUE (base columns present)
 #' validate_sankey_input(df, require_weights = TRUE)  # FALSE (weight cols missing)
-validate_sankey_input <- function(data, require_weights = FALSE) {
+validate_sankey_input <- function(data, require_weights = FALSE, warn = TRUE) {
   # Required columns for all frameworks
   required_base <- c("sender", "ligand", "receptor", "receiver")
 
@@ -471,9 +471,11 @@ validate_sankey_input <- function(data, require_weights = FALSE) {
   missing_weights <- setdiff(required_weights, colnames(data))
 
   if (length(missing_weights) > 0) {
-    warning("Missing weight columns for flow-conserving mode: ",
-            paste(missing_weights, collapse = ", "),
-            "\nFalling back to uniform edge weights.")
+    if (warn) {
+      warning("Missing weight columns for flow-conserving mode: ",
+              paste(missing_weights, collapse = ", "),
+              "\nFalling back to uniform edge weights.")
+    }
     return(FALSE)
   }
 

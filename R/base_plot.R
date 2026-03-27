@@ -210,6 +210,7 @@ BasePlot <- R6::R6Class(
 
       # Set default download button to SVG (plain list, no JS objects).
       # Safe for IRdisplay::display() in Jupyter.
+      # Note: PDF is not supported client-side by Plotly.js; use sankey_save() for PDF.
       fig <- plotly::config(fig, toImageButtonOptions = list(
         format = "svg",
         width = private$.width,
@@ -226,22 +227,21 @@ BasePlot <- R6::R6Class(
     .apply_export_config = function(fig) {
       w <- private$.width
       h <- private$.height
+      # Default camera button exports SVG; add one custom button for PNG (2x scale)
       plotly::config(fig,
         toImageButtonOptions = list(format = "svg", width = w, height = h),
         modeBarButtonsToAdd = list(
           list(
-            name = "Download as PNG",
-            icon = htmlwidgets::JS("Plotly.Icons.camera"),
+            name = "Download as PNG (2x)",
+            icon = htmlwidgets::JS(paste0(
+              "{width:1000,height:1000,path:'",
+              "M500 450Q500 500 450 500L150 500Q100 500 100 450L100 150Q100 100 150 100L450 100Q500 100 500 150Z",
+              "M350 200L250 325L200 275L150 350L450 350L350 200Z",
+              "M225 225A35 35 0 1 0 225 155A35 35 0 1 0 225 225Z",
+              "',ascent:1000,descent:0}"
+            )),
             click = htmlwidgets::JS(sprintf(
               "function(gd) { Plotly.downloadImage(gd, {format: 'png', width: %d, height: %d, scale: 2}); }",
-              w, h
-            ))
-          ),
-          list(
-            name = "Download as PDF",
-            icon = htmlwidgets::JS("Plotly.Icons.disk"),
-            click = htmlwidgets::JS(sprintf(
-              "function(gd) { Plotly.downloadImage(gd, {format: 'pdf', width: %d, height: %d}); }",
               w, h
             ))
           )
