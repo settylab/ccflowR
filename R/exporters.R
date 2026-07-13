@@ -133,8 +133,18 @@ to_image <- function(fig, filename, format = "png", width = NULL, height = NULL,
   } else if (!exported && requireNamespace("plotly", quietly = TRUE) &&
       requireNamespace("reticulate", quietly = TRUE)) {
     tryCatch({
-      # Try to find Python with kaleido in common locations
-      python_path <- Sys.getenv("RETICULATE_PYTHON", "")
+      # Try to find Python with kaleido in common locations.
+      # RETICULATE_PYTHON has highest precedence in reticulate, so an invalid
+      # stale value must be cleared before reticulate initializes Python.
+      reticulate_python <- Sys.getenv("RETICULATE_PYTHON", "")
+      python_path <- reticulate_python
+      if (nzchar(reticulate_python) && !file.exists(reticulate_python)) {
+        methods_tried <- c(
+          methods_tried,
+          paste0("kaleido (RETICULATE_PYTHON does not exist: ", reticulate_python, ")")
+        )
+        python_path <- ""
+      }
 
       # If not set, try to derive from the current R installation's conda prefix.
       # When R runs inside a conda/micromamba environment, R.home() is typically
@@ -198,7 +208,10 @@ to_image <- function(fig, filename, format = "png", width = NULL, height = NULL,
       }
 
       if (nzchar(python_path) && file.exists(python_path)) {
+        Sys.setenv(RETICULATE_PYTHON = python_path)
         reticulate::use_python(python_path, required = FALSE)
+      } else if (nzchar(reticulate_python) && !file.exists(reticulate_python)) {
+        Sys.unsetenv("RETICULATE_PYTHON")
       }
 
       # Verify kaleido is available

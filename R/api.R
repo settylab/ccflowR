@@ -1093,3 +1093,176 @@ sankey_show <- function(plot) {
   print(plot)
   invisible(plot)
 }
+
+
+
+#' Display a Sankey Plot in a Jupyter Notebook
+#'
+#' @description
+#' Explicit notebook display helper for Sankey plots. It renders the real
+#' interactive Plotly/htmlwidget object with \code{sankey_render()} and, when
+#' requested, appends a static PNG preview generated through
+#' \code{sankey_save()}. This is the recommended helper for Jupyter notebooks
+#' that need reliable saved outputs without downstream display wrappers.
+#'
+#' @param plot A sankey object created by \code{sankey_plot()}.
+#' @param width Optional widget and static preview width in pixels.
+#' @param height Optional widget and static preview height in pixels.
+#' @param static Logical. If \code{TRUE}, also export and display a static PNG
+#'   preview. Default: \code{TRUE}.
+#' @param static_file Optional output path for the static PNG preview. If
+#'   \code{NULL}, a temporary \code{.png} file is used.
+#' @param scale Scale factor passed to \code{sankey_save()} for static preview
+#'   export. Default: \code{1}.
+#' @param quiet Logical. If \code{TRUE}, suppress informational messages.
+#' @param ... Additional arguments passed to \code{sankey_save()} when
+#'   \code{static = TRUE}.
+#'
+#' @return Invisibly returns a list with the rendered widget, static preview
+#'   path, export status, and any static export error message.
+#'
+#' @export
+#'
+#' @examples
+#' ex <- example_communication()
+#' p <- sankey_plot(ex$data, ex$colors) +
+#'   sankey_title("Notebook display") +
+#'   sankey_layout(width = 760, height = 520)
+#'
+#' # In Jupyter, display the widget and try to append a PNG preview.
+#' # sankey_display_notebook(p, width = 760, height = 520)
+sankey_display_notebook <- function(plot,
+                                    width = NULL,
+                                    height = NULL,
+                                    static = TRUE,
+                                    static_file = NULL,
+                                    scale = 1,
+                                    quiet = FALSE,
+                                    ...) {
+  if (!inherits(plot, "sankey")) {
+    stop("plot must be a sankey object created by sankey_plot()", call. = FALSE)
+  }
+  if (!is.logical(static) || length(static) != 1 || is.na(static)) {
+    stop("static must be TRUE or FALSE", call. = FALSE)
+  }
+  if (!is.logical(quiet) || length(quiet) != 1 || is.na(quiet)) {
+    stop("quiet must be TRUE or FALSE", call. = FALSE)
+  }
+  if (!is.null(static_file) && !grepl("\\.png$", static_file, ignore.case = TRUE)) {
+    stop("static_file must end in .png", call. = FALSE)
+  }
+
+  fig <- sankey_render(plot)
+  fig <- sankey_set_widget_dimensions(fig, width = width, height = height)
+
+  displayed <- sankey_display_widget(fig, quiet = quiet)
+
+  result <- list(
+    widget = fig,
+    static_file = NULL,
+    static_exported = FALSE,
+    static_error = NULL
+  )
+
+  if (isTRUE(static)) {
+    png_file <- static_file %||% tempfile(fileext = ".png")
+
+    static_result <- tryCatch({
+      sankey_save(plot, png_file, width = width, height = height, scale = scale, ...)
+
+      if (!file.exists(png_file) || file.info(png_file)[["size"]] <= 0) {
+        stop("Static PNG export did not create a nonempty file.", call. = FALSE)
+      }
+
+      if (is_jupyter_notebook() && requireNamespace("IRdisplay", quietly = TRUE)) {
+        IRdisplay::display_png(file = png_file)
+      } else if (!quiet && !displayed) {
+        message("Static PNG preview written to: ", png_file)
+      }
+
+      list(file = png_file, error = NULL)
+    }, error = function(e) {
+      msg <- sankey_static_preview_error_message(conditionMessage(e))
+      if (!quiet) {
+        message(msg)
+      }
+      list(file = NULL, error = msg)
+    })
+
+    result$static_file <- static_result$file
+    result$static_exported <- !is.null(static_result$file)
+    result$static_error <- static_result$error
+  }
+
+  invisible(result)
+}
+
+
+# Internal helper so notebook display code can be tested separately from Plotly
+# rendering and static export backends.
+sankey_set_widget_dimensions <- function(fig, width = NULL, height = NULL) {
+  if (!is.null(width)) {
+    fig$width <- width
+    if (!is.null(fig$x)) {
+      fig$x$layout$width <- width
+    }
+  }
+  if (!is.null(height)) {
+    fig$height <- height
+    if (!is.null(fig$x)) {
+      fig$x$layout$height <- height
+    }
+  }
+  fig
+}
+
+
+sankey_display_widget <- function(fig, quiet = FALSE) {
+  displayed <- FALSE
+
+  if (is_jupyter_notebook() &&
+      requireNamespace("repr", quietly = TRUE) &&
+      requireNamespace("IRdisplay", quietly = TRUE)) {
+    displayed <- tryCatch({
+      html_repr <- repr::repr_html(fig)
+      if (!is.null(html_repr)) {
+        IRdisplay::display_html(html_repr)
+        TRUE
+      } else {
+        FALSE
+      }
+    }, error = function(e) FALSE)
+  }
+
+  if (!displayed && is_jupyter_notebook() &&
+      requireNamespace("IRdisplay", quietly = TRUE)) {
+    IRdisplay::display(fig)
+    displayed <- TRUE
+  }
+
+  if (!displayed && interactive()) {
+    print(fig)
+    displayed <- TRUE
+  }
+
+  if (!displayed && !quiet) {
+    message("Not running in a Jupyter notebook; returning the rendered Plotly widget.")
+  }
+
+  displayed
+}
+
+
+sankey_static_preview_error_message <- function(error_message) {
+  paste0(
+    "Static PNG preview failed, but the interactive Sankey widget is still available.\n\n",
+    "Static export error:\n",
+    error_message,
+    "\n\n",
+    "Install one static export backend and restart R:\n",
+    "  - Kaleido/Python: pip install 'kaleido<1.0' in the Python used by reticulate.\n",
+    "  - webshot2 + Chrome/Chromium: install.packages('webshot2'); webshot2::install_chromium().\n",
+    "  - Orca: install the Plotly orca command line tool and make sure it is on PATH.\n",
+    "If using reticulate, set RETICULATE_PYTHON to a Python with Plotly and Kaleido available."
+  )
+}
