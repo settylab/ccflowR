@@ -1,0 +1,289 @@
+---
+title: "Contextnet Multinichenet"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    df_print: paged
+---
+
+# ContextNet + MultiNicheNet Workflow
+
+ContextNet and MultiNicheNet can produce communication tables where each path is associated with a condition, group, contrast, or time point. `ccflowR` visualizes those paths as group-colored sender -> ligand -> receptor -> receiver Sankey plots.
+
+This tutorial uses packaged example data to show how condition-aware communication paths can be checked, displayed, filtered, and exported.
+
+### Tutorial Goals
+
+1. Load a MultiNicheNet-style communication table with group information.
+2. Confirm the input structure and group counts before plotting.
+3. Create group-colored Sankey diagrams.
+4. Compare individual conditions using the same visual encoding.
+5. Tune highlighting, ordering, and filtering for interpretation.
+6. Export interactive and static figures.
+
+### When to Use Multi-Condition Sankey Plots
+
+Use a multi-condition Sankey plot when the same sender -> ligand -> receptor -> receiver schema is available across groups and the analysis question is comparative. Examples include control versus treatment, disease states, developmental stages, spatial zones, or sample groups.
+
+A group-colored ccflowR plot should separate two ideas:
+
+- pathway presence or strength within each condition;
+- cell-type abundance or sampling differences, which must be interpreted from the upstream analysis design rather than from the Sankey width alone.
+
+## Data Requirements
+
+### Required Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| `sender` | character | Sending cell type |
+| `receiver` | character | Receiving cell type |
+| `ligand` | character | Ligand gene symbol |
+| `receptor` | character | Receptor gene symbol (optional -- omit with `receptor_col = NULL` for 3-layer plots) |
+| `group` | character | Condition label (e.g., "Control", "Treatment") |
+
+ContextNet's `prepare_for_ccflowr()` produces all required columns including expression weights that enable edge thickness to reflect biological signal strength.
+
+### Loading Your Own Data
+
+    # Load your MultiNicheNet output file
+    data <- read_multinichenet("path/to/multinichenet_output.csv")
+    table(data$group)
+
+```{r contextnet_multinichenet_1, message=TRUE, warning=TRUE}
+library(ccflowR)
+
+# Use the full widget + PNG helper for the primary plot. Repeated tutorial
+# examples use package-generated static previews to keep committed notebooks
+# small enough for public sharing.
+display_sankey <- function(p, width = 600, height = 900, static = TRUE, widget = FALSE) {
+  p <- p + sankey_layout(width = width, height = height)
+  p
+}
+```
+
+## Step 1: Load Data
+
+```{r contextnet_multinichenet_2, message=TRUE, warning=TRUE}
+# Use example data for demonstration
+ex <- example_multinichenet()
+data <- ex$data
+
+# Inspect the data structure
+head(data)
+
+# View the groups
+table(data$group)
+```
+
+```{r contextnet_multinichenet_3, message=TRUE, warning=TRUE}
+# Get a summary of the communication data
+summarize_data(data)
+```
+
+You should see 27 interactions across 3 conditions with different network densities: Control has 6 core interactions, Treatment has 9 (adding immune-activation pathways like TGFB1 from Fibroblast and IL6 from Macrophage), and Disease has 12 (adding inflammatory pathways like CCL2 and expanded IFNG/IL6 signaling to B_cell). This mirrors real biology where disease conditions activate additional signaling. The data includes `prioritization_score`, `scaled_lfc_ligand`, and `scaled_lfc_receptor` columns, which enable flow-conserving mode with expression-weighted edge thickness.
+
+## Step 2: Define Colors
+
+**Why two color sets?** MultiNicheNet analysis requires two separate color mappings. Cell type colors identify senders and receivers. Group colors map to experimental conditions so flows can be colored by condition, making it possible to see at a glance which pathways are active in which condition.
+
+```{r contextnet_multinichenet_4, message=TRUE, warning=TRUE}
+# Cell type colors (from example data)
+celltype_colors <- ex$colors
+print(celltype_colors)
+
+# Group/condition colors (from example data)
+group_colors <- ex$group_colors
+print(group_colors)
+
+# Verify all groups have colors
+groups_in_data <- unique(data$group)
+missing <- setdiff(groups_in_data, names(group_colors))
+if (length(missing) > 0) {
+  cat("Warning: No colors defined for:", paste(missing, collapse = ", "), "\n")
+} else {
+  cat("All groups have colors assigned\n")
+}
+```
+
+## Step 3: Create a Group-Colored Sankey
+
+**Why color by group?** This is the defining feature of MultiNicheNet visualization. Coloring flows by condition lets you see which signaling pathways are shared across conditions and which are condition-specific.
+
+Two functions work together: `sankey_colors(by = "condition")` tells ccflowR to color flows by condition, and `sankey_group_colors()` provides the color mapping.
+
+```{r contextnet_multinichenet_5, message=TRUE, warning=TRUE}
+p <- sankey_plot(data, celltype_colors, group_col = "group") +
+  sankey_colors(by = "condition") +
+  sankey_group_colors(group_colors) +
+  sankey_alpha(0.6) +
+  sankey_title("Cell Communication by Condition")
+display_sankey(p, widget = TRUE)
+```
+
+**Reading the plot:**
+- Each flow is colored by its experimental condition
+- Where flows for the same interaction overlap, you can see which conditions share that pathway
+- Flow thickness reflects the prioritization score for each condition — a thicker Treatment flow means that interaction is more active in Treatment
+- Ligand-receptor pairs present in all three conditions appear as stacked colored flows at the same position
+
+## Step 4: Compare Individual Conditions
+
+The combined group-colored plot shows all conditions at once but can become dense. Per-condition plots provide cleaner views for direct side-by-side comparison. Use the same `sankey_order()` across all panels to keep node positions consistent.
+
+```{r contextnet_multinichenet_6, message=TRUE, warning=TRUE}
+# Filter to Control only
+control_data <- data[data$group == "Control", ]
+
+p <- sankey_plot(control_data, celltype_colors) +
+  sankey_colors(by = "sender") +
+  sankey_alpha(0.7) +
+  sankey_title("Control Condition")
+display_sankey(p)
+```
+
+```{r contextnet_multinichenet_7, message=TRUE, warning=TRUE}
+# Filter to Disease only
+disease_data <- data[data$group == "Disease", ]
+
+p <- sankey_plot(disease_data, celltype_colors) +
+  sankey_colors(by = "sender") +
+  sankey_alpha(0.7) +
+  sankey_title("Disease Condition")
+display_sankey(p)
+```
+
+Compare the two plots: Control has only 6 interactions, while Disease adds inflammatory pathways (CCL2, expanded IFNG/IL6 signaling to B_cell). Macrophage sends 2 signals in Control but 4 in Disease, and shared pathways like TGFB1 show progressively stronger signals.
+
+## Step 5: Customize Your Figure
+
+ccflowR customizations work the same way with multi-condition data. See the **Parameter Reference Guide** for all options.
+
+**New features:**
+- `sankey_colors(by = "steelblue")` -- use any color string for monochrome flows
+- `sankey_nodes(arrangement = "snap")` -- enable interactive node dragging
+- `sankey_plot(..., receptor_col = NULL)` -- omit receptor layer for 3-layer diagrams
+
+```{r contextnet_multinichenet_8, message=TRUE, warning=TRUE}
+# Highlight Macrophage signaling across all conditions
+p <- sankey_plot(data, celltype_colors, group_col = "group") +
+  sankey_colors(by = "condition") +
+  sankey_group_colors(group_colors) +
+  sankey_highlight(senders = "Macrophage", dim_alpha = 0.1) +
+  sankey_alpha(0.7) +
+  sankey_title("Macrophage Signaling by Condition")
+display_sankey(p)
+```
+
+### Custom Node Ordering
+
+By default, nodes are ordered using a barycenter heuristic that minimizes link crossings. Keep node positions consistent across all panels for direct visual comparison by specifying a custom order.
+
+```{r contextnet_multinichenet_9, message=TRUE, warning=TRUE}
+p <- sankey_plot(data, celltype_colors, group_col = "group") +
+  sankey_colors(by = "condition") +
+  sankey_group_colors(group_colors) +
+  sankey_order(
+    senders = c("Macrophage", "T_cell", "B_cell", "Fibroblast", "Endothelial"),
+    receivers = c("T_cell", "B_cell", "Macrophage", "Fibroblast", "Endothelial")
+  ) +
+  sankey_alpha(0.6) +
+  sankey_title("Custom Node Order")
+display_sankey(p)
+```
+
+## Step 6: Filter Top Interactions
+
+MultiNicheNet data often contains many interactions. Use `filter_top_pathways()` with `per_group = TRUE` to get the top N from each condition, ensuring balanced representation across groups.
+
+```{r contextnet_multinichenet_10, message=TRUE, warning=TRUE}
+# Filter to top 5 per condition — ensures balanced representation
+top_per_group <- filter_top_pathways(data, n = 5, per_group = TRUE, group_col = "group")
+cat("Interactions per group after filtering:\n")
+print(table(top_per_group$group))
+
+p <- sankey_plot(top_per_group, celltype_colors, group_col = "group") +
+  sankey_colors(by = "condition") +
+  sankey_group_colors(group_colors) +
+  sankey_alpha(0.6) +
+  sankey_title("Top 5 per Condition (Balanced)")
+display_sankey(p)
+```
+
+## Step 7: Export
+
+Save your figure as HTML (interactive) or static formats (PNG, PDF, SVG). See the **Parameter Reference Guide** for all export options and format details.
+
+```{r contextnet_multinichenet_11, message=TRUE, warning=TRUE}
+# Build a publication-ready figure
+p <- sankey_plot(data, celltype_colors, group_col = "group") +
+  sankey_colors(by = "condition") +
+  sankey_group_colors(group_colors) +
+  sankey_highlight(senders = "Macrophage") +
+  sankey_alpha(0.6) +
+  sankey_title("Macrophage Signaling by Condition")
+
+html_file <- tempfile(fileext = ".html")
+html_ok <- tryCatch({
+  sankey_save(p, html_file)
+  file.exists(html_file) && file.info(html_file)[["size"]] > 0
+}, error = function(e) {
+  message("HTML export skipped in this run: ", conditionMessage(e))
+  FALSE
+})
+cat("HTML export check:", if (html_ok) "ok" else "skipped", "\n")
+
+png_file <- tempfile(fileext = ".png")
+png_ok <- tryCatch({
+  sankey_save(p, png_file, width = 700, height = 900)
+  file.exists(png_file) && file.info(png_file)[["size"]] > 0
+}, error = function(e) {
+  message("PNG export skipped in this run: ", conditionMessage(e))
+  FALSE
+})
+cat("PNG export check:", if (png_ok) "ok" else "skipped", "\n")
+```
+
+## Complete Workflow
+
+    library(ccflowR)
+
+    # 1. Load your MultiNicheNet output
+    data <- read_multinichenet("path/to/multinichenet_output.csv")
+    print(table(data$group))
+
+    # 2. Define colors
+    celltype_colors <- c(
+      "B Cell" = "#17BECF", "T Cell" = "#006837",
+      "Myeloid" = "#FF7F0E", "Fibroblast" = "#9C46D3",
+      "Epithelial" = "#1F77B4", "Endothelial" = "#E89FBD"
+    )
+    group_colors <- c(
+      "Control" = "#ADD8E6", "Treatment" = "#F08080", "Disease" = "#90EE90"
+    )
+
+    # 3. Create comparison figure
+    p <- sankey_plot(data, celltype_colors, group_col = "group") +
+      sankey_colors(by = "condition") +
+      sankey_group_colors(group_colors) +
+      sankey_alpha(0.6) +
+      sankey_title("Condition Comparison")
+
+    # 4. Save (see Parameter Reference Guide for all export options)
+    sankey_save(p, "Figure2_comparison.html")
+    sankey_save(p, "Figure2_comparison.png", width = 700, height = 900)
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "group column not found" | Ensure your data has a `group` column, or specify the correct name with `group_col` |
+| Colors don't match conditions | Check that `sankey_group_colors()` names match unique values in the group column |
+| Too many flows | Use `filter_top_pathways(data, n = 10, per_group = TRUE)` to reduce density |
+| Nodes in wrong order | Default uses barycenter ordering. Use `sankey_order()` to set explicit positions |
+| Want receptor-free view | Use `sankey_plot(..., receptor_col = NULL)` for a 3-layer Sender -> Ligand -> Receiver diagram |
+
+## Next Steps
+- **Single condition analysis**: See the [NicheNet tutorial](tutorial-contextnet-nichenet.ipynb) for detailed single-condition workflows
+- **Parameter reference**: See the [Parameter Guide](tutorial-parameter-guide.ipynb) for all customization options, including 3-layer mode (`receptor_col`), fixed flow colors, and node arrangement modes
+- **Export options**: `sankey_save()` supports HTML, PNG, PDF, and SVG formats

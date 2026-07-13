@@ -1,191 +1,183 @@
 # ccflowR
 
-The visualization module for [ContextNet](https://github.com/settylab/ContextNet) -- interactive Sankey diagrams for cell-cell communication in R.
+`ccflowR` visualizes cell-cell communication results as interactive river/Sankey plots in R. It was built as the visualization companion for [ContextNet](https://github.com/settylab/ContextNet), a method that uses a context-specific gene regulatory network (GRN), ligand-target priors, sender ligand expression, and receiver receptor expression to prioritize communication paths. `ccflowR` takes the path-level output from ContextNet or related tools and displays it as:
 
-ccflowR renders ligand-receptor signaling as a four-layer flow:
-
-**Sender &rarr; Ligand &rarr; Receptor &rarr; Receiver**
-
-```
-┌─────────────────────┐     ┌─────────────────┐     ┌─────────────┐
-│ GRN Inference       │────>│ ContextNet      │────>│ ccflowR     │
-│ (Snakemake)         │     │ (R package)     │     │ (Sankey)    │
-│                     │     │                 │     │             │
-│ scRNA + scATAC      │     │ GRN + NicheNet  │     │ Visualize   │
-│ → TF-target GRN     │     │ → Ligand scores │     │ → Figures   │
-└─────────────────────┘     └─────────────────┘     └─────────────┘
-                                    │
-                                    v
-                              sankey_river.csv
+```text
+sender cell -> ligand -> receptor -> receiver cell
 ```
 
-While designed for ContextNet output, ccflowR also works with results from [NicheNet](https://github.com/saeyslab/nichenetr), [MultiNicheNet](https://github.com/saeyslab/multinichenetr), [LIANA](https://github.com/saezlab/liana), and [CellPhoneDB](https://github.com/ventolab/CellphoneDB) via built-in readers.
+The package is useful when a large ligand-receptor result needs path-level inspection: which cells send a signal, which ligand-receptor pair carries it, which cells receive it, and how strong the path appears under the chosen scoring columns. The plot is a visualization of model-supported hypotheses; it is not direct proof of secretion, receptor binding, spatial contact, or causality.
 
 ## Installation
 
+### Direct R or RStudio
+
+Install from the public GitHub repository:
+
 ```r
-devtools::install_github("ccflow/ccflowR")
+install.packages("remotes", repos = "https://cloud.r-project.org")
+remotes::install_github("settylab/ccflowR", upgrade = "never")
 ```
 
-## Quick Start
+Load the package and run a smoke test:
 
 ```r
 library(ccflowR)
 
-# Load ContextNet / NicheNet output
-data <- read_nichenet("path/to/sankey_river.csv")
+ex <- example_communication()
+summarize_data(ex$data)
 
-# Define cell type colors (consistent across figures)
-colors <- c(
-  Macrophage  = "#E41A1C",
-  T_cell      = "#377EB8",
-  B_cell      = "#4DAF4A",
-  Fibroblast  = "#984EA3",
-  Endothelial = "#FF7F00"
-)
-
-# Build and customize with ggplot2-style + operator
-p <- sankey_plot(data, colors) +
-  sankey_colors(by = "receiver") +
-  sankey_highlight(senders = "Macrophage", dim_alpha = 0.1) +
-  sankey_alpha(0.6) +
-  sankey_title("Macrophage Signaling Network")
-
-# Export
-sankey_save(p, "figure.html")                            # interactive
-sankey_save(p, "figure.png", width = 700, height = 900)  # static
+p <- sankey_plot(ex$data, ex$colors)
+summary(p)
 ```
 
-### Multi-Condition Comparison (MultiNicheNet)
+Expected smoke-test features:
+
+- 15 interactions
+- 5 sender cell types
+- 5 receiver cell types
+- 11 ligands
+- 11 receptors
+- a `sankey` object with default dimensions `600 x 900`
+
+### Micromamba and Jupyter
+
+The repository includes an `environment.yml` for notebook users:
+
+```bash
+micromamba create -n ccflowr -f environment.yml -y
+micromamba run -n ccflowr R -e "remotes::install_local('.', dependencies = NA, upgrade = 'never')"
+micromamba run -n ccflowr R -e "IRkernel::installspec(name = 'ccflowr_r', displayname = 'ccflowR R')"
+```
+
+Run a notebook from the repository root:
+
+```bash
+micromamba run -n ccflowr jupyter nbconvert --to notebook --execute \
+  --ExecutePreprocessor.kernel_name=ccflowr_r \
+  notebooks/tutorial-contextnet-nichenet.ipynb
+```
+
+The notebooks are committed with the `ccflowr_r` kernel name and the display name `ccflowR R`.
+
+### Static Export Dependencies
+
+Interactive HTML export works with the required R dependencies. Static PNG/PDF/SVG export needs one working image backend:
+
+- Python `plotly` plus `kaleido<1.0`, installed in the Python used by `reticulate`
+- `webshot2` plus Chrome/Chromium
+- Plotly orca on `PATH`
+
+The provided `environment.yml` installs Python `plotly` and `kaleido<1.0`. If static export fails, check `RETICULATE_PYTHON`; a stale value can point R to the wrong Python environment.
+
+## Input Structure
+
+`ccflowR` expects one row per communication path. Reader functions standardize common formats, but the internal plotting schema is:
+
+| Column | Required | Meaning | Used For |
+|--------|----------|---------|----------|
+| `sender` | yes | Cell type or cell state producing the ligand | first plot layer and sender coloring |
+| `ligand` | yes | Ligand gene or ligand complex | second plot layer |
+| `receptor` | yes for 4-layer plots | Receptor gene or receptor complex | third plot layer |
+| `receiver` | yes | Cell type or cell state receiving the signal | final plot layer and receiver coloring |
+| `scaled_activity` | optional | Ligand/path activity or prioritization score | flow-conserving edge weights |
+| `scaled_ligand_expression` | optional | Sender-side ligand expression or differential expression | sender -> ligand edge weights |
+| `scaled_receptor_expression` | optional | Receiver-side receptor expression or differential expression | receptor -> receiver edge weights |
+| `group` | optional | Condition, sample group, contrast, or time point | multi-condition coloring |
+
+If the three scaled weight columns are present, the default `flow = "flow_conserving"` mode uses them to make edge widths reflect signal strength. If they are absent, `ccflowR` falls back to uniform edge widths so the plot still shows topology.
+
+For ligand-only displays, set `receptor_col = NULL`; the plot becomes:
+
+```text
+sender cell -> ligand -> receiver cell
+```
+
+### ContextNet Input
+
+ContextNet can write a `sankey_river.csv`-style table after ligand prioritization. Read it with:
+
+```r
+data <- read_nichenet("path/to/sankey_river.csv")
+```
+
+ContextNet-derived tables should include `sender`, `receiver`, `ligand`, `receptor`, and score/expression columns such as `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`.
+
+### MultiNicheNet Input
+
+MultiNicheNet-style tables include a condition column and differential expression scores. `read_multinichenet()` maps the usual columns onto the ccflowR schema:
 
 ```r
 data <- read_multinichenet("path/to/multinichenet_output.csv")
-
-group_colors <- c(Control = "#ADD8E6", Treatment = "#F08080", Disease = "#90EE90")
-
-p <- sankey_plot(data, colors, group_col = "group") +
-  sankey_colors(by = "condition") +
-  sankey_group_colors(group_colors) +
-  sankey_title("Condition Comparison")
+table(data$group)
 ```
 
-## Readers
+By default:
 
-| Framework | Reader | Description |
-|-----------|--------|-------------|
-| ContextNet / NicheNet | `read_nichenet()` | Ligand-receptor prioritization (single condition) |
-| MultiNicheNet | `read_multinichenet()` | Multi-condition differential analysis |
-| LIANA | `read_liana()` | Ligand-receptor inference |
-| CellPhoneDB | `read_cellphonedb()` | Statistical cell-cell communication |
+- `prioritization_score` becomes `scaled_activity`
+- `scaled_lfc_ligand` becomes `scaled_ligand_expression`
+- `scaled_lfc_receptor` becomes `scaled_receptor_expression`
 
-Each reader maps framework-specific column names to the standard format ccflowR expects.
-
-## Layer Functions
-
-All customizations are added with the `+` operator:
-
-| Function | Description | Default |
-|----------|-------------|---------|
-| `sankey_colors(by)` | Color flows by `"sender"`, `"receiver"`, `"ligand"`, or `"condition"` | `"sender"` |
-| `sankey_alpha(value)` | Flow transparency (0--1) | `0.65` |
-| `sankey_highlight(...)` | Dim non-matching flows; filter by `senders`, `ligands`, `receptors`, `receivers` | |
-| `sankey_order(...)` | Custom vertical node order per layer | data order |
-| `sankey_nodes(thickness, padding)` | Node bar width and spacing | `20`, `30` |
-| `sankey_node_colors(mode)` | `"cell_type"` or `"weighted_mix"` | `"cell_type"` |
-| `sankey_labels(size)` | Label font size | `12` |
-| `sankey_title(title, size)` | Plot title | |
-| `sankey_layout(width, height)` | Dimensions in pixels | `600 x 900` |
-| `sankey_margins(left, right, top, bottom)` | Margins in pixels | `50, 50, 80, 50` |
-| `sankey_background(paper, plot)` | Background colors | `"white"` |
-| `sankey_font(family, size)` | Font family and base size | `"Arial"`, `12` |
-| `sankey_orientation(direction)` | `"horizontal"` or `"vertical"` | `"horizontal"` |
-| `sankey_legend(show, title)` | Toggle legend | `TRUE` |
-| `sankey_group_colors(colors)` | Colors for condition-based coloring | |
-| `sankey_interactive()` | Add dropdown filter menus | |
-
-## Preprocessing
+## Basic Use
 
 ```r
-filter_by_celltypes(data, include_senders = c("Macrophage", "T_cell"))
-filter_top_interactions(data, n = 20)
-filter_top_pathways(data, n = 5, per_group = TRUE, group_col = "group")
-filter_by_ligands(data, include_ligands = c("TGFB1", "IL6"))
-filter_by_expression(data, min_activity = 0.5)
-```
+library(ccflowR)
 
-
-## Jupyter Notebook Display
-
-For IRkernel/Jupyter notebooks, use `sankey_display_notebook()` when a saved notebook should include both the interactive Sankey widget and, when available, a static PNG preview generated by ccflowR itself.
-
-```r
 ex <- example_communication()
+data <- ex$data
+celltype_colors <- ex$colors
 
-p <- sankey_plot(ex$data, ex$colors) +
-  sankey_title("ccflowR notebook display smoke test") +
-  sankey_layout(width = 760, height = 520)
+p <- sankey_plot(data, celltype_colors) +
+  sankey_colors(by = "receiver") +
+  sankey_highlight(senders = "Macrophage", dim_alpha = 0.1) +
+  sankey_alpha(0.6) +
+  sankey_title("Macrophage signaling paths")
 
-# Displays the real interactive Plotly/htmlwidget and tries to append a PNG preview.
+p
+```
+
+In Jupyter notebooks, use the package-native display helper so saved notebooks include the interactive htmlwidget and, when available, a static PNG preview:
+
+```r
 sankey_display_notebook(p, width = 760, height = 520, static = TRUE)
 ```
 
-The interactive widget path uses `repr` and `IRdisplay` in Jupyter. Static PNG preview requires one working export backend:
-
-- Kaleido in the Python used by `reticulate`: `pip install 'kaleido<1.0'`
-- `webshot2` plus Chrome/Chromium: `install.packages("webshot2"); webshot2::install_chromium()`
-- Plotly orca on `PATH` as a fallback
-
-If static export is unavailable, the helper still returns the interactive widget and prints the backend-specific failure details. Use `static = FALSE` to skip the PNG preview.
-
-## Export Formats
-
-| Format | Extension | Requirements |
-|--------|-----------|-------------|
-| HTML | `.html` | None |
-| PNG | `.png` | kaleido or webshot2 |
-| PDF | `.pdf` | kaleido or webshot2 |
-| SVG | `.svg` | kaleido or chromote |
+## Export
 
 ```r
 sankey_save(p, "figure.html")
-sankey_save(p, "figure.png", width = 700, height = 900, scale = 2)  # retina
+sankey_save(p, "figure.png", width = 700, height = 900, scale = 2)
 sankey_pdf(p, "figure.pdf")
 ```
 
-## Data Format
-
-ccflowR expects a data frame with the following columns. Reader functions handle column mapping automatically.
-
-| Column | Required | Description |
-|--------|----------|-------------|
-| `sender` | Yes | Sending cell type |
-| `receiver` | Yes | Receiving cell type |
-| `ligand` | Yes | Ligand gene symbol |
-| `receptor` | Yes | Receptor gene symbol |
-| `scaled_activity` | No | Activity score (enables flow-conserving mode) |
-| `scaled_receptor_expression` | No | Receptor expression (enables flow-conserving mode) |
-| `group` | No | Experimental condition label |
+| Format | Extension | Requirements |
+|--------|-----------|--------------|
+| Interactive HTML | `.html` | required R dependencies only |
+| PNG | `.png` | Kaleido or webshot2/Chrome |
+| PDF | `.pdf` | Kaleido or webshot2/Chrome |
+| SVG | `.svg` | Kaleido or chromote |
 
 ## Tutorials
 
-| Notebook | Description |
-|----------|-------------|
-| [ContextNet + NicheNet](notebooks/tutorial-contextnet-nichenet.ipynb) | Single-condition workflow from data loading to export |
-| [ContextNet + MultiNicheNet](notebooks/tutorial-contextnet-multinichenet.ipynb) | Multi-condition comparison with per-group filtering |
-| [Parameter Guide](notebooks/tutorial-parameter-guide.ipynb) | Visual catalog of every parameter |
+Tutorial source files live under `notebooks/`. RStudio users can open the `.Rmd` companions directly; Jupyter users can open the `.ipynb` notebooks.
 
-R Markdown vignettes:
+| Tutorial | Question Addressed | Main Output | Files |
+|----------|--------------------|-------------|-------|
+| ContextNet + NicheNet | How can a single-condition ContextNet/NicheNet communication table be inspected as sender -> ligand -> receptor -> receiver paths? | Single-condition Sankey plots, highlighting, ordering, export | [`ipynb`](notebooks/tutorial-contextnet-nichenet.ipynb), [`Rmd`](notebooks/tutorial-contextnet-nichenet.Rmd) |
+| ContextNet + MultiNicheNet | How do communication paths differ across groups or conditions? | Group-colored Sankey plots and per-condition comparisons | [`ipynb`](notebooks/tutorial-contextnet-multinichenet.ipynb), [`Rmd`](notebooks/tutorial-contextnet-multinichenet.Rmd) |
+| Parameter Reference | Which visual parameter changes which part of the Sankey plot? | Executed parameter checks and side-by-side visual examples | [`ipynb`](notebooks/tutorial-parameter-guide.ipynb), [`Rmd`](notebooks/tutorial-parameter-guide.Rmd) |
 
-```r
-vignette("contextnet-nichenet", package = "ccflowR")
-vignette("contextnet-multinichenet", package = "ccflowR")
-```
+See [`notebooks/README.md`](notebooks/README.md) for tutorial-running notes and the expected notebook kernel.
 
-## Dependencies
+## Troubleshooting
 
-**Required:** R (>= 4.0.0), plotly, dplyr, tidyr, R6, jsonlite, htmlwidgets
-
-**Optional:** repr and IRdisplay (Jupyter display), kaleido or webshot2 with Chrome/Chromium (static export)
+| Symptom | Likely Cause | What To Try |
+|---------|--------------|-------------|
+| `Missing required columns` | Input table does not use ccflowR column names | Use `read_nichenet()`, `read_multinichenet()`, or pass custom column names to a reader |
+| All flows have equal width | Weight columns are absent or invalid | Add `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`, or use `flow = "uniform"` intentionally |
+| Static PNG export fails | Kaleido, Python plotly, Chrome, or webshot2 is unavailable | Use the micromamba environment, install `kaleido<1.0` plus Python `plotly`, or configure `webshot2` with Chrome |
+| Jupyter shows no plot | Kernel is not the ccflowR R environment or widget output is hidden | Select `ccflowR R` and use `sankey_display_notebook()` |
+| `RETICULATE_PYTHON` points to a missing Python | R is trying to use a stale Python path | Unset `RETICULATE_PYTHON` or point it to the micromamba environment Python |
 
 ## License
 

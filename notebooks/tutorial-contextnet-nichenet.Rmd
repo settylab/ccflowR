@@ -1,0 +1,266 @@
+---
+title: "Contextnet Nichenet"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    df_print: paged
+---
+
+# ContextNet + NicheNet Workflow
+
+ContextNet is an R workflow for context-aware cell-cell communication inference. It connects sender ligands to receiver-cell response using receptor expression, ligand-target priors, and a context-specific gene regulatory network (GRN; transcription-factor to target-gene regulatory evidence from the biological system being analyzed).
+
+`ccflowR` visualizes the communication paths that come out of ContextNet or NicheNet-style analyses as sender -> ligand -> receptor -> receiver Sankey plots. This tutorial uses packaged example data to show the plotting workflow, expected input columns, figure customization, and export.
+
+### Tutorial Goals
+
+1. Load a ContextNet/NicheNet-style communication table.
+2. Confirm the input structure before plotting.
+3. Create sender -> ligand -> receptor -> receiver Sankey plots.
+4. Tune colors, highlighting, ordering, and flow mode for interpretation.
+5. Export interactive and static figures.
+
+### How ccflowR Fits in the ContextNet Pipeline
+
+```text
+scRNA + scATAC -> context-specific GRN -> ContextNet ligand prioritization -> ccflowR Sankey plot
+```
+
+ContextNet produces or can be adapted to produce a path table with sender cells, ligands, receptors, receiver cells, and score/expression columns. `ccflowR` turns that table into a path-level display:
+
+```text
+Sender cell -> Ligand -> Receptor -> Receiver cell
+```
+
+The plot helps inspect model-supported communication hypotheses. It should be interpreted alongside ligand expression, receptor expression, receiver target-gene evidence, regulatory scores, sample design, and external biological evidence.
+
+## Data Requirements
+
+### Required Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| `sender` | character | Sending cell type name |
+| `receiver` | character | Receiving cell type name |
+| `ligand` | character | Ligand gene symbol |
+| `receptor` | character | Receptor gene symbol (optional -- omit with `receptor_col = NULL` for 3-layer plots) |
+
+ContextNet's `prepare_for_ccflowr()` produces all required columns including expression weights (`scaled_activity`, `scaled_ligand_expression`, `scaled_receptor_expression`) that enable edge thickness to reflect biological signal strength.
+
+### Loading Your Own Data
+
+    # Load your NicheNet/ContextNet output file
+    data <- read_nichenet("path/to/your/sankey_river.csv")
+    head(data)
+
+```{r contextnet_nichenet_1, message=TRUE, warning=TRUE}
+library(ccflowR)
+
+# Use the full widget + PNG helper for the primary plot. Repeated tutorial
+# examples use package-generated static previews to keep committed notebooks
+# small enough for public sharing.
+display_sankey <- function(p, width = 600, height = 900, static = TRUE, widget = FALSE) {
+  p <- p + sankey_layout(width = width, height = height)
+  p
+}
+```
+
+## Step 1: Load Data
+
+**Why start here?** Before any visualization, you need to verify that your data loaded correctly and contains the expected columns. Inspecting the data early catches formatting issues before they cause cryptic errors downstream.
+
+```{r contextnet_nichenet_2, message=TRUE, warning=TRUE}
+# Use example data for demonstration
+ex <- example_communication()
+data <- ex$data
+
+# Inspect the data structure
+head(data)
+```
+
+**Why summarize?** `summarize_data()` gives a quick overview of your network: how many interactions, cell types, ligands, and receptors. This is the fastest way to check that no data was lost during import and that column names mapped correctly.
+
+```{r contextnet_nichenet_3, message=TRUE, warning=TRUE}
+# Get a summary of the communication data
+summarize_data(data)
+```
+
+You should see 15 interactions involving 5 cell types (Macrophage, T_cell, B_cell, Fibroblast, Endothelial) with 11 unique ligands and 11 unique receptors. Notice that some ligands (TGFB1, TNF, IL6) are produced by multiple senders, and some receptors (TGFBR1, TNFRSF1A, IL6R, IFNGR1) appear on multiple receivers — these shared nodes create convergence and divergence patterns in the Sankey diagram.
+
+## Step 2: Define Cell Type Colors
+
+**Why define colors explicitly?** When generating multiple figures for a paper or presentation, using the same color for each cell type across all panels makes it easier for readers to track cell types at a glance.
+
+```{r contextnet_nichenet_4, message=TRUE, warning=TRUE}
+# Use colors from the example data
+celltype_colors <- ex$colors
+
+# View the color assignments
+print(celltype_colors)
+
+# Verify all cell types in data have colors assigned
+all_celltypes <- get_all_celltypes(data)
+missing <- setdiff(all_celltypes, names(celltype_colors))
+if (length(missing) > 0) {
+  cat("Warning: No colors defined for:", paste(missing, collapse = ", "), "\n")
+} else {
+  cat("All cell types have colors assigned\n")
+}
+```
+
+## Step 3: Create Your First Sankey Plot
+
+**Why start with a basic plot?** Before customizing, verify that your data loaded correctly and get an overview of the communication network. The default plot shows all interactions with sensible defaults.
+
+```{r contextnet_nichenet_5, message=TRUE, warning=TRUE}
+# Basic plot — edge thickness reflects expression levels, colored by sender
+p <- sankey_plot(data, celltype_colors)
+display_sankey(p, widget = TRUE)
+```
+
+The plot displays four layers from left to right:
+1. **Sender** (left) - Cell types sending signals
+2. **Ligand** (center-left) - Signaling molecules
+3. **Receptor** (center-right) - Receptor molecules
+4. **Receiver** (right) - Cell types receiving signals
+
+Edge thickness reflects expression levels — thicker edges represent stronger interactions. Nodes are automatically ordered to minimize link crossings.
+
+> **Tip:** Set `receptor_col = NULL` in `sankey_plot()` to create a simpler 3-layer diagram (Sender -> Ligand -> Receiver) when receptor information is not needed.
+
+## Step 4: Customize Your Figure
+
+ccflowR uses a `+` operator to layer customizations. Below are the most common adjustments for NicheNet data. See the **Parameter Reference Guide** for exhaustive visual examples of every parameter.
+
+### Coloring Strategies
+
+Color flows by `"sender"` (default), `"receiver"`, or `"ligand"` to answer different biological questions.
+
+```{r contextnet_nichenet_6, message=TRUE, warning=TRUE}
+# Color by receiver — "Who is receiving the most signals?"
+p <- sankey_plot(data, celltype_colors) +
+  sankey_colors(by = "receiver") +
+  sankey_title("Colored by Receiver Cell Type")
+display_sankey(p)
+```
+
+### Uniform Mode (Optional)
+
+By default, edge thickness reflects expression levels. If you only want to show which cell types communicate (ignoring signal strength), use uniform mode.
+
+```{r contextnet_nichenet_7, message=TRUE, warning=TRUE}
+# Show network topology only (all edges equal thickness)
+p <- sankey_plot(data, celltype_colors, flow = "uniform") +
+  sankey_title("Uniform Mode (Topology Only)")
+display_sankey(p)
+```
+
+### Highlighting Pathways
+
+Use `sankey_highlight()` to focus attention on specific pathways while keeping the full network visible for context. You can highlight by `senders`, `receivers`, `ligands`, or `receptors` (multiple criteria use AND logic). See the **Parameter Reference Guide** for all highlighting options and `dim_alpha` variations.
+
+```{r contextnet_nichenet_8, message=TRUE, warning=TRUE}
+# Focus on signals FROM Macrophages
+p <- sankey_plot(data, celltype_colors) +
+  sankey_highlight(senders = "Macrophage", dim_alpha = 0.1) +
+  sankey_title("Signals FROM Macrophages")
+display_sankey(p)
+```
+
+### Custom Node Ordering
+
+By default, nodes are ordered using a barycenter heuristic that minimizes link crossings. Use `sankey_order()` to override with a custom arrangement based on biological narrative (e.g., differentiation stage, immune cell hierarchy).
+
+```{r contextnet_nichenet_9, message=TRUE, warning=TRUE}
+p <- sankey_plot(data, celltype_colors) +
+  sankey_order(
+    senders = c("Macrophage", "Fibroblast", "T_cell", "B_cell", "Endothelial"),
+    receivers = c("T_cell", "B_cell", "Fibroblast", "Endothelial", "Macrophage")
+  ) +
+  sankey_title("Custom Node Order")
+display_sankey(p)
+```
+
+### 3-Layer Mode (No Receptor)
+
+When your analysis focuses on ligand-target cell relationships without explicit receptor data, omit the receptor layer for a cleaner visualization.
+
+```{r contextnet_nichenet_10, message=TRUE, warning=TRUE}
+# 3-layer Sankey: Sender -> Ligand -> Receiver
+p <- sankey_plot(data, celltype_colors, receptor_col = NULL) +
+  sankey_title("3-Layer Mode (receptor omitted)")
+display_sankey(p)
+```
+
+## Step 5: Export
+
+Save your figure as HTML (interactive) or static formats (PNG, PDF, SVG). See the **Parameter Reference Guide** for all export options and format details.
+
+```{r contextnet_nichenet_11, message=TRUE, warning=TRUE}
+# Build a publication-ready figure
+p <- sankey_plot(data, celltype_colors) +
+  sankey_colors(by = "receiver") +
+  sankey_highlight(senders = "Macrophage") +
+  sankey_alpha(0.6) +
+  sankey_title("Macrophage Signaling Network")
+
+html_file <- tempfile(fileext = ".html")
+html_ok <- tryCatch({
+  sankey_save(p, html_file)
+  file.exists(html_file) && file.info(html_file)[["size"]] > 0
+}, error = function(e) {
+  message("HTML export skipped in this run: ", conditionMessage(e))
+  FALSE
+})
+cat("HTML export check:", if (html_ok) "ok" else "skipped", "\n")
+
+png_file <- tempfile(fileext = ".png")
+png_ok <- tryCatch({
+  sankey_save(p, png_file, width = 700, height = 900)
+  file.exists(png_file) && file.info(png_file)[["size"]] > 0
+}, error = function(e) {
+  message("PNG export skipped in this run: ", conditionMessage(e))
+  FALSE
+})
+cat("PNG export check:", if (png_ok) "ok" else "skipped", "\n")
+```
+
+## Complete Workflow
+
+    library(ccflowR)
+
+    # 1. Load your NicheNet/ContextNet output
+    data <- read_nichenet("path/to/your/sankey_river.csv")
+    summarize_data(data)
+
+    # 2. Define cell type colors
+    celltype_colors <- c(
+      "B Cell" = "#17BECF", "T Cell" = "#006837",
+      "Myeloid" = "#FF7F0E", "Fibroblast" = "#9C46D3",
+      "Epithelial" = "#1F77B4", "Endothelial" = "#E89FBD"
+    )
+
+    # 3. Create and customize figure
+    p <- sankey_plot(data, celltype_colors) +
+      sankey_colors(by = "receiver") +
+      sankey_highlight(senders = "Macrophage") +
+      sankey_alpha(0.6) +
+      sankey_title("Cell-Cell Communication")
+
+    # 4. Save (see Parameter Reference Guide for all export options)
+    sankey_save(p, "Figure1.html")
+    sankey_save(p, "Figure1.png", width = 700, height = 900)
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "Missing required columns" | Check column names: `sender`, `receiver`, `ligand`, `receptor` |
+| "Falling back to uniform" | Add `scaled_activity` and `scaled_receptor_expression` columns |
+| Plot not displaying | Select the `ccflowR R` kernel and use `sankey_display_notebook()` in Jupyter |
+| Colors not applied | Ensure color vector names match cell type names exactly (case-sensitive) |
+| Static export fails | Use the micromamba environment, install Python `plotly` plus `kaleido<1.0`, or configure `webshot2` with Chrome/Chromium |
+
+## Next Steps
+- **Multi-condition analysis**: See the MultiNicheNet tutorial
+- **All parameters**: See the Parameter Reference Guide
