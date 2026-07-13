@@ -41,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Solution**: Use `IRdisplay::display(fig)` to explicitly send htmlwidgets to Jupyter's display system. This is the ONLY reliable method.
 - **Key insight**: The return value of `print()` methods is always discarded by R. You cannot rely on returning a value from print - you MUST use side effects (`IRdisplay::display()` for Jupyter, `print()` for console).
 - **All display methods now work**: `p` (just typing), `print(p)`, `sankey_show(p)`, `sankey_flow()`, and `plot$show()` all work correctly.
-- **See `todo-jupyter-display.md`** for detailed documentation of failed approaches and why the current implementation must not be changed.
 - **SVG export without kaleido**: Added chromote-based fallback for SVG export. When kaleido is not available, ccflowR now uses Chrome/Chromium via chromote to render the plot and extract SVG using Plotly.js's built-in `toImage()` function.
 - **Better export error messages**: Export errors now show which methods were tried and why they failed, making troubleshooting easier.
 - **Export method detection order**:
@@ -114,8 +113,8 @@ SankeyPlot$new(data, colors)$colors("sender")$alpha(0.7)$show()
 - New API test suite (`test-api.R`) with 50+ tests covering all new functions
 
 ### Documented
-- **Known issue: Graph sometimes not printed on first execution** - This is a common plotly htmlwidget issue in certain R environments. Workaround is to re-run the code. See task.md for details.
-- **Essential Tutorial Components guide**: Added comprehensive checklist to task.md based on analysis of Seurat and Mellon documentation best practices. Includes structure requirements, before/after code block guidance, parameter documentation standards, decision guidance patterns, and a pre-publish tutorial checklist.
+- **Known issue: Graph sometimes not printed on first execution** - This is a common plotly htmlwidget issue in certain R environments. If the first render is blank, re-run the plotting cell.
+- **Essential Tutorial Components guide**: Added a tutorial checklist based on Seurat and Mellon documentation patterns, covering structure, before/after code blocks, parameter documentation, decision guidance, and pre-publish checks.
 
 #### Enhanced Example Data
 - **`example_communication()`**: Now includes `scaled_activity` and `scaled_receptor_expression` columns, enabling flow-conserving mode to work in tutorials instead of falling back to uniform.
@@ -134,7 +133,6 @@ SankeyPlot$new(data, colors)$colors("sender")$alpha(0.7)$show()
 ### Planned
 - pkgdown website setup
 - Enhanced README with visual examples
-See task.md for detailed documentation tasks.
 
 ## [0.1.0] - 2025-01-14
 

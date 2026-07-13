@@ -1,0 +1,1 @@
+tests/testthat/_snaps/*.md whitespace=-blank-at-eol,-blank-at-eof

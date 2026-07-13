@@ -1,0 +1,50 @@
+# R package build artifacts
+/doc/
+/Meta/
+*.Rcheck/
+*.tar.gz
+*.tmp*
+*.Rproj
+
+# Test outputs
+tests/visual-outputs/
+tests/test-results.log
+
+# Dev notes / scratch files
+CLAUDE.md
+todo-jupyter-display.md
+task.md
+reproducibility/
+scripts/
+
+# Notebook generated files
+notebooks/*_files/
+notebooks/*.html
+notebooks/contextnet_outputs/
+notebooks/test-*
+notebooks/example_output*
+example_output*
+
+# System files
+.DS_Store
+**/.DS_Store
+*.smbdelete*
+.Rhistory
+.RData
+.Renviron
+Rplots.pdf
+.Thumbs.db
+
+# R environment
+.Rproj.user/
+.httr-oauth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / editor
+.vscode/
+.idea/
+.claude/
+.cursor/
+.github/

@@ -222,7 +222,7 @@ BasePlot <- R6::R6Class(
 
     # Apply additional export config (PNG/PDF custom buttons with JS handlers).
     # IMPORTANT: Do NOT call this in render(). htmlwidgets::JS() objects break
-    # IRdisplay::display() in Jupyter (see todo-jupyter-display.md).
+    # IRdisplay::display() in Jupyter; only use JS modebar handlers for saved HTML.
     # Only apply when saving to HTML files.
     .apply_export_config = function(fig) {
       w <- private$.width
