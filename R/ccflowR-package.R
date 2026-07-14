@@ -24,9 +24,9 @@
 #'   \item{\code{\link{read_nichenet}}}{Import NicheNet output files (CSV/TSV)}
 #'   \item{\code{\link{read_multinichenet}}}{Import MultiNicheNet output with
 #'     group information for multi-condition comparisons}
-#'   \item{\code{\link{from_liana}}}{Import LIANA output with automatic
+#'   \item{\code{\link{read_liana}}}{Import LIANA output with automatic
 #'     rank-to-activity conversion}
-#'   \item{\code{\link{from_cellphonedb}}}{Import CellPhoneDB output files}
+#'   \item{\code{\link{read_cellphonedb}}}{Import CellPhoneDB output files}
 #' }
 #'
 #' @section Data Processing Functions:

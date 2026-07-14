@@ -32,10 +32,10 @@ provided, it is returned as-is after column renaming.}
 Falls back to \code{"activity"} if not found. Set to \code{NULL} to skip.}
 
 \item{ligand_expr_col}{Column name for ligand expression. Default:
-\code{"scaled_ligand_expression"}. Used for flow-conserving edge weights.}
+\code{"scaled_ligand_expression"}. Used for weighted edge widths.}
 
 \item{receptor_expr_col}{Column name for receptor expression. Default:
-\code{"scaled_receptor_expression"}. Used for flow-conserving edge weights.}
+\code{"scaled_receptor_expression"}. Used for weighted edge widths.}
 
 \item{sep}{Column separator. Default: \code{NULL} (auto-detect based on
 file extension: comma for .csv, tab for .tsv/.txt)}
@@ -45,7 +45,7 @@ Data frame with standardized column names and framework attribute set to "nichen
 }
 \description{
 Read NicheNet analysis output and prepare it for visualization.
-Supports both simple activity-based data and flow-conserving data
+Supports both simple activity-based data and weighted-flow data
 with expression columns.
 }
 \examples{
@@ -53,7 +53,7 @@ with expression columns.
 # Simple NicheNet output
 data <- read_nichenet("nichenet_output.csv")
 
-# With flow-conserving columns
+# With weighted-flow columns
 data <- read_nichenet("nichenet_sankey.csv",
                       activity_col = "scaled_activity",
                       ligand_expr_col = "scaled_ligand_expression",

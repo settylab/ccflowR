@@ -146,18 +146,16 @@ test_that("3-layer plot forces uniform flow method", {
                           flow_method = "flow_conserving")
 
   s <- plot$summary()
-  # If it didn't error, it successfully fell back to uniform
   expect_s3_class(plot, "SankeyPlot")
+  expect_equal(s$flow_method, "uniform")
 })
 
-test_that("flow_method('flow_conserving') warns in 3-layer mode", {
+test_that("flow_method('flow_conserving') quietly falls back in 3-layer mode", {
   fix <- fixture_small_data()
   plot <- SankeyPlot$new(fix$data, fix$colors, receptor_col = NULL)
 
-  expect_warning(
-    plot$flow_method("flow_conserving"),
-    "receptor layer"
-  )
+  expect_silent(plot$flow_method("flow_conserving"))
+  expect_equal(plot$summary()$flow_method, "uniform")
 })
 
 

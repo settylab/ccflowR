@@ -146,7 +146,7 @@ display_sankey(p)
 
 ### Uniform Mode (Optional)
 
-By default, edge thickness reflects expression levels. If you only want to show which cell types communicate (ignoring signal strength), use uniform mode.
+By default, `flow = "auto"` uses weighted edge widths when the table includes `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`. If those columns are absent, the plot uses equal-width paths. Use uniform mode when the figure should show topology only.
 
 ```{r contextnet_nichenet_7, message=TRUE, warning=TRUE}
 # Show network topology only (all edges equal thickness)
@@ -256,7 +256,7 @@ cat("PNG export check:", if (png_ok) "ok" else "skipped", "\n")
 | Issue | Solution |
 |-------|----------|
 | "Missing required columns" | Check column names: `sender`, `receiver`, `ligand`, `receptor` |
-| "Falling back to uniform" | Add `scaled_activity` and `scaled_receptor_expression` columns |
+| Equal-width flows in auto mode | Add `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`; or use `flow = "uniform"` intentionally |
 | Plot not displaying | Select the `ccflowR R` kernel and use `sankey_display_notebook()` in Jupyter |
 | Colors not applied | Ensure color vector names match cell type names exactly (case-sensitive) |
 | Static export fails | Use the micromamba environment, install Python `plotly` plus `kaleido<1.0`, or configure `webshot2` with Chrome/Chromium |

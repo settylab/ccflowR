@@ -10,7 +10,7 @@ test_that("CCFlowSettings can be created directly", {
   expect_equal(settings$font_size(), 12)
   expect_equal(settings$fallback_color(), "#A0A0A0")
   expect_equal(settings$default_colormap(), "Set2")
-  expect_equal(settings$verbose(), TRUE)
+  expect_equal(settings$verbose(), FALSE)
 })
 
 test_that("CCFlowSettings setters return self for chaining", {

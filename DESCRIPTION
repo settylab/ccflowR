@@ -26,10 +26,9 @@ Imports:
     tools,
     utils,
     htmlwidgets,
-    base64enc
+    knitr
 Suggests:
     testthat (>= 3.0.0),
-    knitr,
     rmarkdown,
     reticulate,
     webshot2,

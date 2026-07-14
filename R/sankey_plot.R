@@ -42,14 +42,16 @@ SankeyPlot <- R6::R6Class(
     #' @param receptor_col Name of receptor column
     #' @param receiver_col Name of receiver column
     #' @param group_col Name of group column (optional)
-    #' @param activity_col Name of activity/weight column (optional). For flow-conserving
-    #'   mode, use "scaled_activity" (default when flow_method = "flow_conserving")
-    #' @param ligand_expr_col Name of ligand expression column for flow-conserving mode.
+    #' @param activity_col Name of activity/weight column (optional). Weighted
+    #'   flow uses "scaled_activity" when present.
+    #' @param ligand_expr_col Name of ligand expression column for weighted flow.
     #'   Default: "scaled_ligand_expression"
-    #' @param receptor_expr_col Name of receptor expression column for flow-conserving mode.
+    #' @param receptor_expr_col Name of receptor expression column for weighted flow.
     #'   Default: "scaled_receptor_expression"
-    #' @param flow_method Edge weight computation method: "flow_conserving" (default) or
-    #'   "uniform". Flow-conserving distributes flow based on expression weights.
+    #' @param flow_method Edge weight computation method. "auto" (default) uses
+    #'   weighted flow when required weight columns are present and uniform flow otherwise.
+    #'   "weighted" and "flow_conserving" use expression-weighted edge thickness.
+    #'   "uniform" draws all communication paths with equal edge weights.
     #' @param auto_prepare Logical. If TRUE, automatically detect framework and map
     #'   columns. Default: TRUE
     #' @param width Plot width in pixels
@@ -65,13 +67,14 @@ SankeyPlot <- R6::R6Class(
                           activity_col = NULL,
                           ligand_expr_col = "scaled_ligand_expression",
                           receptor_expr_col = "scaled_receptor_expression",
-                          flow_method = c("flow_conserving", "uniform"),
+                          flow_method = c("auto", "weighted", "flow_conserving", "uniform"),
                           auto_prepare = TRUE,
                           width = NULL,
                           height = NULL) {
 
-      flow_explicit <- !missing(flow_method)
       flow_method <- match.arg(flow_method)
+      requested_flow_method <- flow_method
+      if (flow_method == "weighted") flow_method <- "flow_conserving"
 
       # Auto-prepare data if requested (detect framework and map columns)
       if (auto_prepare) {
@@ -111,22 +114,18 @@ SankeyPlot <- R6::R6Class(
       }
       private$.activity_col <- activity_col
 
-      # Determine if flow-conserving is possible
-      if (!private$.has_receptor) {
-        # 3-layer mode: flow-conserving requires receptor expression, fall back
-        if (flow_method == "flow_conserving") {
-          ccflow_log("No receptor layer: falling back to uniform flow method")
-          flow_method <- "uniform"
-        }
-        can_flow_conserve <- FALSE
-      } else {
-        can_flow_conserve <- validate_sankey_input(data, require_weights = TRUE,
-                                                      warn = flow_explicit)
-        if (flow_method == "flow_conserving" && !can_flow_conserve) {
-          ccflow_log("Falling back to uniform flow method")
-          flow_method <- "uniform"
-        }
+      # Resolve edge-weighting mode. Auto is intentionally quiet: if users
+      # provide all required weight columns, use weighted flow; otherwise draw
+      # uniform-width paths so topology can still be inspected.
+      can_flow_conserve <- private$.has_receptor &&
+        validate_sankey_input(data, require_weights = TRUE, warn = FALSE)
+
+      if (flow_method == "auto") {
+        flow_method <- if (can_flow_conserve) "flow_conserving" else "uniform"
+      } else if (flow_method == "flow_conserving" && !can_flow_conserve) {
+        flow_method <- "uniform"
       }
+      private$.requested_flow_method <- requested_flow_method
       private$.flow_method <- flow_method
 
       # Initialize color palettes
@@ -360,34 +359,32 @@ SankeyPlot <- R6::R6Class(
     },
 
     #' @description Configure edge weight computation method
-    #' @param method One of "flow_conserving" or "uniform".
-    #'   - "flow_conserving": Distributes flow based on expression weights,
-    #'     ensuring flow conservation through intermediate nodes. Requires
-
-    #'     scaled_activity, scaled_ligand_expression, and scaled_receptor_expression columns.
-    #'   - "uniform": Uses uniform weights (activity value or 1) for all edges.
+    #' @param method One of "auto", "weighted", "flow_conserving", or "uniform".
+    #'   - "auto": Uses weighted flow when required columns are present;
+    #'     otherwise uses uniform edge widths without warning.
+    #'   - "weighted"/"flow_conserving": Uses expression-weighted edge widths
+    #'     when scaled_activity, scaled_ligand_expression, and
+    #'     scaled_receptor_expression are present; otherwise uses uniform widths.
+    #'   - "uniform": Uses equal edge widths for all communication paths.
     #' @return Self (invisibly) for chaining
     #' @examples
-    #' plot$flow_method("uniform")  # Use simple uniform weights
-    #' plot$flow_method("flow_conserving")  # Use expression-weighted flow
-    flow_method = function(method = c("flow_conserving", "uniform")) {
+    #' plot$flow_method("uniform")  # Draw equal-width paths
+    #' plot$flow_method("weighted")  # Use expression-weighted flow when available
+    flow_method = function(method = c("auto", "weighted", "flow_conserving", "uniform")) {
       method <- match.arg(method)
+      requested_method <- method
+      if (method == "weighted") method <- "flow_conserving"
 
-      # Check if flow-conserving is possible
-      if (method == "flow_conserving") {
-        if (!private$.has_receptor) {
-          warning("Cannot use flow_conserving method without receptor layer. Using uniform instead.",
-                  call. = FALSE)
-          method <- "uniform"
-        } else {
-          can_flow_conserve <- validate_sankey_input(private$.data, require_weights = TRUE)
-          if (!can_flow_conserve) {
-            warning("Cannot use flow_conserving method: missing required columns. Using uniform instead.")
-            method <- "uniform"
-          }
-        }
+      can_flow_conserve <- private$.has_receptor &&
+        validate_sankey_input(private$.data, require_weights = TRUE, warn = FALSE)
+
+      if (method == "auto") {
+        method <- if (can_flow_conserve) "flow_conserving" else "uniform"
+      } else if (method == "flow_conserving" && !can_flow_conserve) {
+        method <- "uniform"
       }
 
+      private$.requested_flow_method <- requested_method
       private$.flow_method <- method
       invisible(self)
     },
@@ -517,7 +514,9 @@ SankeyPlot <- R6::R6Class(
         has_receptor = private$.has_receptor,
         color_by = private$.color_by,
         alpha = private$.alpha,
-        dimensions = c(width = private$.width, height = private$.height)
+        dimensions = c(width = private$.width, height = private$.height),
+        flow_method = private$.flow_method,
+        requested_flow_method = private$.requested_flow_method
       )
       if (private$.has_receptor) {
         result$n_receptors <- length(unique(data[[private$.receptor_col]]))
@@ -537,6 +536,7 @@ SankeyPlot <- R6::R6Class(
     .receptor_expr_col = NULL,
     .has_receptor = NULL,       # TRUE = 4-layer (S->L->R->T), FALSE = 3-layer (S->L->T)
     .flow_method = NULL,
+    .requested_flow_method = NULL,
     .node_color_mode = NULL,  # "cell_type" or "weighted_mix"
     .ligand_colors = NULL,    # Computed ligand colors (for weighted_mix mode)
     .receptor_colors = NULL,  # Computed receptor colors (for weighted_mix mode)
@@ -926,28 +926,18 @@ SankeyPlot <- R6::R6Class(
     },
 
     # Build links with uniform weights
-    # Uniform mode: Edge 1 uses scaled_activity, Edges 2-3 split flow equally
-    # at shared nodes. This differs from flow-conserving which splits proportional
-    # to receptor expression.
+    # Uniform mode: each input row contributes one equal-width path. Intermediate
+    # links split flow equally at shared nodes so topology is visible without
+    # using activity or expression values.
     .build_links_uniform = function(data, node_idx, senders, ligands, receptors, receivers) {
       sender_col <- private$.sender_col
       ligand_col <- private$.ligand_col
       receptor_col <- private$.receptor_col
       receiver_col <- private$.receiver_col
-      activity_col <- private$.activity_col
       has_receptor <- private$.has_receptor
 
       # --- Step 1: Compute Edge 1 (Sender -> Ligand) values ---
-      edge1_values <- numeric(nrow(data))
-      for (i in seq_len(nrow(data))) {
-        value <- if (!is.null(activity_col) && activity_col %in% colnames(data)) {
-          as.numeric(data[[activity_col]][i])
-        } else {
-          1
-        }
-        if (is.na(value) || value <= 0) value <- 1
-        edge1_values[i] <- value
-      }
+      edge1_values <- rep(1, nrow(data))
 
       # --- Step 2: Compute ligand total inflow and outgoing count ---
       ligand_total_in <- list()
@@ -1846,12 +1836,14 @@ SankeyPlot <- R6::R6Class(
 #' @param alpha Link transparency 0-1 (default: 0.65)
 #' @param label_size Font size for node labels (default: 16)
 #' @param label_position Position of labels (NOTE: not supported by Plotly Sankey - has no effect)
-#' @param flow_method Edge weight computation method (default: "flow_conserving"):
+#' @param flow_method Edge weight computation method (default: "auto"):
 #'   \itemize{
-#'     \item "flow_conserving": Distributes flow based on expression weights.
-#'       Requires scaled_activity, scaled_ligand_expression, scaled_receptor_expression columns.
-#'       Automatically falls back to "uniform" if columns are missing.
-#'     \item "uniform": Uses uniform weights (activity value or 1) for all edges.
+#'     \item "auto": Uses weighted flow when required columns are present;
+#'       otherwise uses uniform edge widths without warning.
+#'     \item "weighted"/"flow_conserving": Uses expression-weighted edge widths
+#'       when scaled_activity, scaled_ligand_expression, and scaled_receptor_expression
+#'       columns are present; otherwise uses uniform edge widths.
+#'     \item "uniform": Uses equal edge widths for all communication paths.
 #'   }
 #' @param node_color_mode Node coloring mode (default: "cell_type"):
 #'   \itemize{
@@ -1880,18 +1872,21 @@ SankeyPlot <- R6::R6Class(
 #'             title = "Cell Communication",
 #'             alpha = 0.7)
 #'
-#' # With labels on top
+#' # With a smaller label font
 #' sankey_flow(ex$data, ex$colors,
-#'             label_position = "top",
 #'             label_size = 14)
 #'
 #' # With interactive filters
 #' sankey_flow(ex$data, ex$colors,
 #'             interactive = TRUE)
 #'
-#' # Use uniform weights instead of flow-conserving
+#' # Use equal-width paths instead of weighted flow
 #' sankey_flow(ex$data, ex$colors,
 #'             flow_method = "uniform")
+#'
+#' # Explicitly request weighted edge widths when weight columns are present
+#' sankey_flow(ex$data, ex$colors,
+#'             flow_method = "weighted")
 #'
 #' # Use weighted color mixing for ligand/receptor nodes
 #' sankey_flow(ex$data, ex$colors,
@@ -1905,7 +1900,7 @@ sankey_flow <- function(data,
                         alpha = 0.65,
                         label_size = 16,
                         label_position = NULL,
-                        flow_method = c("flow_conserving", "uniform"),
+                        flow_method = c("auto", "weighted", "flow_conserving", "uniform"),
                         node_color_mode = c("cell_type", "weighted_mix"),
                         interactive = FALSE,
                         receptor_col = "receptor",

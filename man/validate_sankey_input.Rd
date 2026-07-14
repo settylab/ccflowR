@@ -11,15 +11,19 @@ validate_sankey_input(data, require_weights = FALSE, warn = TRUE)
 
 \item{require_weights}{Logical. If TRUE, also check for weight columns.
 Default: FALSE}
+
+\item{warn}{Logical. If TRUE, warn about missing or invalid optional weight
+values. Internal auto-mode checks set this to FALSE so plots can quietly
+use uniform edge widths when weights are unavailable. Default: TRUE}
 }
 \value{
 Logical. TRUE if data is valid for the requested mode.
-Returns FALSE with a warning if weight columns are missing.
+Returns FALSE with a warning if weight columns are missing and \code{warn = TRUE}.
 }
 \description{
 Validate that input data has the required columns for sankey plot
 generation. Checks for base required columns and optionally for
-weight columns needed for flow-conserving computation.
+weight columns needed for weighted edge widths.
 }
 \examples{
 df <- data.frame(sender = "A", receiver = "B", ligand = "L1", receptor = "R1")

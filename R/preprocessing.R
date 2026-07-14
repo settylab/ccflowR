@@ -290,7 +290,7 @@ aggregate_by_group <- function(data,
         n_interactions = dplyr::n(),
         .groups = "drop"
       ) %>%
-      dplyr::mutate(activity = n_interactions)
+      dplyr::mutate(activity = .data$n_interactions)
   }
 
   # Rename columns back to standard names

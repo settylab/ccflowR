@@ -181,12 +181,17 @@ test_that("settings getters return set values", {
 })
 
 test_that("settings chaining returns self", {
-  result <- ccflow_settings()$
+  settings <- ccflow_settings()
+  original_verbose <- settings$verbose()
+  on.exit(settings$verbose(original_verbose), add = TRUE)
+
+  result <- settings$
     dpi(100)$
     font_size(12)$
     verbose(TRUE)
 
   expect_s3_class(result, "CCFlowSettings")
+  settings$verbose(original_verbose)
 })
 
 # --- Data Extraction Properties ---

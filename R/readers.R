@@ -8,7 +8,7 @@ NULL
 #'
 #' @description
 #' Read NicheNet analysis output and prepare it for visualization.
-#' Supports both simple activity-based data and flow-conserving data
+#' Supports both simple activity-based data and weighted-flow data
 #' with expression columns.
 #'
 #' @param file Path to CSV/TSV file or a data frame. If a data frame is
@@ -20,9 +20,9 @@ NULL
 #' @param activity_col Column name for activity scores. Default: \code{"scaled_activity"}.
 #'   Falls back to \code{"activity"} if not found. Set to \code{NULL} to skip.
 #' @param ligand_expr_col Column name for ligand expression. Default:
-#'   \code{"scaled_ligand_expression"}. Used for flow-conserving edge weights.
+#'   \code{"scaled_ligand_expression"}. Used for weighted edge widths.
 #' @param receptor_expr_col Column name for receptor expression. Default:
-#'   \code{"scaled_receptor_expression"}. Used for flow-conserving edge weights.
+#'   \code{"scaled_receptor_expression"}. Used for weighted edge widths.
 #' @param sep Column separator. Default: \code{NULL} (auto-detect based on
 #'   file extension: comma for .csv, tab for .tsv/.txt)
 #'
@@ -34,7 +34,7 @@ NULL
 #' # Simple NicheNet output
 #' data <- read_nichenet("nichenet_output.csv")
 #'
-#' # With flow-conserving columns
+#' # With weighted-flow columns
 #' data <- read_nichenet("nichenet_sankey.csv",
 #'                       activity_col = "scaled_activity",
 #'                       ligand_expr_col = "scaled_ligand_expression",
@@ -310,6 +310,10 @@ read_cellphonedb <- function(file, means_file = NULL, sep = NULL) {
 #' Read Delimited File (Internal)
 #' @keywords internal
 read_delimited <- function(file, sep = NULL) {
+  if (!file.exists(file)) {
+    stop("No such file: ", file, call. = FALSE)
+  }
+
   # Auto-detect separator
   if (is.null(sep)) {
     # Read first line to detect

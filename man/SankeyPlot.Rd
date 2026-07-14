@@ -39,8 +39,8 @@ plot$label_style(size = 14)  # Only size has effect
 ## Method `SankeyPlot$flow_method`
 ## ------------------------------------------------
 
-plot$flow_method("uniform")  # Use simple uniform weights
-plot$flow_method("flow_conserving")  # Use expression-weighted flow
+plot$flow_method("uniform")  # Draw equal-width paths
+plot$flow_method("weighted")  # Use expression-weighted flow when available
 
 ## ------------------------------------------------
 ## Method `SankeyPlot$node_colors`
@@ -111,7 +111,7 @@ Initialize Sankey plot
   activity_col = NULL,
   ligand_expr_col = "scaled_ligand_expression",
   receptor_expr_col = "scaled_receptor_expression",
-  flow_method = c("flow_conserving", "uniform"),
+  flow_method = c("auto", "weighted", "flow_conserving", "uniform"),
   auto_prepare = TRUE,
   width = NULL,
   height = NULL
@@ -137,17 +137,19 @@ Initialize Sankey plot
 
 \item{\code{group_col}}{Name of group column (optional)}
 
-\item{\code{activity_col}}{Name of activity/weight column (optional). For flow-conserving
-mode, use "scaled_activity" (default when flow_method = "flow_conserving")}
+\item{\code{activity_col}}{Name of activity/weight column (optional). Weighted
+flow uses "scaled_activity" when present.}
 
-\item{\code{ligand_expr_col}}{Name of ligand expression column for flow-conserving mode.
+\item{\code{ligand_expr_col}}{Name of ligand expression column for weighted flow.
 Default: "scaled_ligand_expression"}
 
-\item{\code{receptor_expr_col}}{Name of receptor expression column for flow-conserving mode.
+\item{\code{receptor_expr_col}}{Name of receptor expression column for weighted flow.
 Default: "scaled_receptor_expression"}
 
-\item{\code{flow_method}}{Edge weight computation method: "flow_conserving" (default) or
-"uniform". Flow-conserving distributes flow based on expression weights.}
+\item{\code{flow_method}}{Edge weight computation method. "auto" (default) uses
+weighted flow when required weight columns are present and uniform flow otherwise.
+"weighted" and "flow_conserving" use expression-weighted edge thickness.
+"uniform" draws all communication paths with equal edge weights.}
 
 \item{\code{auto_prepare}}{Logical. If TRUE, automatically detect framework and map
 columns. Default: TRUE}
@@ -454,18 +456,22 @@ Self (invisibly) for chaining
 \subsection{Method \code{flow_method()}}{
 Configure edge weight computation method
 \subsection{Usage}{
-\if{html}{\out{<div class="r">}}\preformatted{SankeyPlot$flow_method(method = c("flow_conserving", "uniform"))}\if{html}{\out{</div>}}
+\if{html}{\out{<div class="r">}}\preformatted{SankeyPlot$flow_method(
+  method = c("auto", "weighted", "flow_conserving", "uniform")
+)}\if{html}{\out{</div>}}
 }
 
 \subsection{Arguments}{
 \if{html}{\out{<div class="arguments">}}
 \describe{
-\item{\code{method}}{One of "flow_conserving" or "uniform".
+\item{\code{method}}{One of "auto", "weighted", "flow_conserving", or "uniform".
 \itemize{
-\item "flow_conserving": Distributes flow based on expression weights,
-ensuring flow conservation through intermediate nodes. Requires
-scaled_activity, scaled_ligand_expression, and scaled_receptor_expression columns.
-\item "uniform": Uses uniform weights (activity value or 1) for all edges.
+\item "auto": Uses weighted flow when required columns are present;
+otherwise uses uniform edge widths without warning.
+\item "weighted"/"flow_conserving": Uses expression-weighted edge widths
+when scaled_activity, scaled_ligand_expression, and
+scaled_receptor_expression are present; otherwise uses uniform widths.
+\item "uniform": Uses equal edge widths for all communication paths.
 }}
 }
 \if{html}{\out{</div>}}
@@ -475,8 +481,8 @@ Self (invisibly) for chaining
 }
 \subsection{Examples}{
 \if{html}{\out{<div class="r example copy">}}
-\preformatted{plot$flow_method("uniform")  # Use simple uniform weights
-plot$flow_method("flow_conserving")  # Use expression-weighted flow
+\preformatted{plot$flow_method("uniform")  # Draw equal-width paths
+plot$flow_method("weighted")  # Use expression-weighted flow when available
 }
 \if{html}{\out{</div>}}
 

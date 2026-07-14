@@ -436,14 +436,17 @@ detect_framework <- function(data) {
 #' @description
 #' Validate that input data has the required columns for sankey plot
 #' generation. Checks for base required columns and optionally for
-#' weight columns needed for flow-conserving computation.
+#' weight columns needed for weighted edge widths.
 #'
 #' @param data A data frame with communication data
 #' @param require_weights Logical. If TRUE, also check for weight columns.
 #'   Default: FALSE
+#' @param warn Logical. If TRUE, warn about missing or invalid optional weight
+#'   values. Internal auto-mode checks set this to FALSE so plots can quietly
+#'   use uniform edge widths when weights are unavailable. Default: TRUE
 #'
 #' @return Logical. TRUE if data is valid for the requested mode.
-#'   Returns FALSE with a warning if weight columns are missing.
+#'   Returns FALSE with a warning if weight columns are missing and `warn = TRUE`.
 #' @export
 #'
 #' @examples
@@ -465,22 +468,21 @@ validate_sankey_input <- function(data, require_weights = FALSE, warn = TRUE) {
     return(TRUE)
   }
 
-  # Check weight columns for flow-conserving mode
+  # Check weight columns for weighted flow
   required_weights <- c("scaled_activity", "scaled_ligand_expression",
                         "scaled_receptor_expression")
   missing_weights <- setdiff(required_weights, colnames(data))
 
   if (length(missing_weights) > 0) {
     if (warn) {
-      warning("Missing weight columns for flow-conserving mode: ",
-              paste(missing_weights, collapse = ", "),
-              "\nFalling back to uniform edge weights.")
+      warning("Missing weight columns for weighted flow: ",
+              paste(missing_weights, collapse = ", "))
     }
     return(FALSE)
   }
 
   # Validate numeric ranges
-  if ("scaled_activity" %in% colnames(data)) {
+  if (warn && "scaled_activity" %in% colnames(data)) {
     if (any(is.na(data$scaled_activity))) {
       warning("scaled_activity contains NA values, will be treated as 0")
     }

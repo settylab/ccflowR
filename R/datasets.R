@@ -318,7 +318,7 @@ example_large <- function(n_interactions = 100, n_celltypes = 8) {
     receiver = sample(cell_types, n_interactions, replace = TRUE),
     ligand = sample(ligands, n_interactions, replace = TRUE),
     receptor = sample(receptors, n_interactions, replace = TRUE),
-    activity = runif(n_interactions, 0.1, 1.0),
+    activity = stats::runif(n_interactions, 0.1, 1.0),
     stringsAsFactors = FALSE
   )
 

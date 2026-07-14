@@ -1,5 +1,5 @@
 # Tests for Flow-Conserving Edge Weight Computation
-# Regression coverage for framework detection and flow-conserving edge weights.
+# Regression coverage for framework detection and weighted edge widths.
 
 # =============================================================================
 # SECTION 1: Framework Detection Tests
@@ -220,14 +220,26 @@ test_that("SankeyPlot supports flow_method parameter", {
 
   colors <- c(A = "#FF0000", B = "#00FF00", C = "#0000FF", D = "#FFFF00")
 
-  # Should not error
+  # Auto and weighted aliases should resolve to weighted flow when columns exist.
+  expect_no_error({
+    plot <- SankeyPlot$new(flow_data, colors)
+  })
+  expect_equal(plot$summary()$flow_method, "flow_conserving")
+
+  expect_no_error({
+    plot <- SankeyPlot$new(flow_data, colors, flow_method = "weighted")
+  })
+  expect_equal(plot$summary()$flow_method, "flow_conserving")
+
   expect_no_error({
     plot <- SankeyPlot$new(flow_data, colors, flow_method = "flow_conserving")
   })
+  expect_equal(plot$summary()$flow_method, "flow_conserving")
 
   expect_no_error({
     plot <- SankeyPlot$new(flow_data, colors, flow_method = "uniform")
   })
+  expect_equal(plot$summary()$flow_method, "uniform")
 })
 
 test_that("SankeyPlot renders with flow_method='flow_conserving'", {
@@ -257,8 +269,8 @@ test_that("SankeyPlot renders with flow_method='uniform'", {
   expect_s3_class(fig, "plotly")
 })
 
-test_that("SankeyPlot falls back to uniform when weight columns missing", {
-  # Create data without weight columns to test fallback
+test_that("SankeyPlot uses uniform flow when weight columns are missing", {
+  # Create data without weight columns to test quiet uniform behavior
   data_no_weights <- data.frame(
     sender = c("A", "B"),
     receiver = c("C", "D"),
@@ -268,11 +280,12 @@ test_that("SankeyPlot falls back to uniform when weight columns missing", {
   )
   colors <- c(A = "#FF0000", B = "#00FF00", C = "#0000FF", D = "#FFFF00")
 
-  # Should fall back to uniform without error
-  expect_warning(
-    plot <- SankeyPlot$new(data_no_weights, colors, flow_method = "flow_conserving"),
-    "Missing weight columns"
+  # Should use uniform flow without warning or error
+  expect_silent(
+    plot <- SankeyPlot$new(data_no_weights, colors, flow_method = "flow_conserving")
   )
+  expect_equal(plot$summary()$flow_method, "uniform")
+  expect_equal(plot$summary()$requested_flow_method, "flow_conserving")
 
   fig <- plot$render()
   expect_s3_class(fig, "plotly")
@@ -301,7 +314,7 @@ test_that("SankeyPlot flow_method() setter works", {
   expect_s3_class(fig, "plotly")
 })
 
-test_that("flow_method() setter warns when columns missing", {
+test_that("flow_method() setter quietly falls back when columns missing", {
   basic_data <- data.frame(
     sender = c("A", "B"),
     receiver = c("C", "D"),
@@ -313,10 +326,10 @@ test_that("flow_method() setter warns when columns missing", {
 
   plot <- SankeyPlot$new(basic_data, colors, flow_method = "uniform")
 
-  expect_warning(
-    plot$flow_method("flow_conserving"),
-    "Cannot use flow_conserving"
-  )
+  expect_silent(result <- plot$flow_method("weighted"))
+  expect_s3_class(result, "SankeyPlot")
+  expect_equal(plot$summary()$flow_method, "uniform")
+  expect_equal(plot$summary()$requested_flow_method, "weighted")
 })
 
 test_that("sankey_flow works with flow_method parameter", {
@@ -777,14 +790,14 @@ test_that("SankeyPlot auto_prepare=FALSE skips mapping", {
 
   colors <- c(A = "#FF0000", B = "#00FF00")
 
-  # With auto_prepare=FALSE, should not have mapped columns
-  # This will cause flow_conserving to fall back to uniform
-  expect_warning(
+  # With auto_prepare=FALSE, columns are not mapped, so weighted flow
+  # resolves to uniform without warning.
+  expect_silent(
     plot <- SankeyPlot$new(multinichenet_data, colors,
                            auto_prepare = FALSE,
-                           flow_method = "flow_conserving"),
-    "Missing weight columns"
+                           flow_method = "flow_conserving")
   )
+  expect_equal(plot$summary()$flow_method, "uniform")
 
   fig <- plot$render()
   expect_s3_class(fig, "plotly")
@@ -793,6 +806,26 @@ test_that("SankeyPlot auto_prepare=FALSE skips mapping", {
 # =============================================================================
 # SECTION 10: Uniform vs Flow-Conserving Visual Difference Tests
 # =============================================================================
+
+test_that("uniform flow uses equal sender-to-ligand values when weights differ", {
+  weighted_data <- data.frame(
+    sender = c("A", "A", "B"),
+    receiver = c("C", "D", "C"),
+    ligand = c("L1", "L2", "L3"),
+    receptor = c("R1", "R2", "R3"),
+    scaled_activity = c(0.1, 10, 100),
+    scaled_ligand_expression = c(3, 6, 9),
+    scaled_receptor_expression = c(2, 4, 8),
+    stringsAsFactors = FALSE
+  )
+  colors <- c(A = "#FF0000", B = "#00FF00", C = "#0000FF", D = "#FFFF00")
+
+  plot <- SankeyPlot$new(weighted_data, colors, flow_method = "uniform")
+  link_values <- plotly::plotly_build(plot$render())$x$data[[1]]$link$value
+
+  sender_to_ligand_values <- link_values[seq(1, length(link_values), by = 3)]
+  expect_equal(sender_to_ligand_values, rep(1, nrow(weighted_data)))
+})
 
 test_that("uniform and flow_conserving produce different edge values for shared ligands", {
   # Data with a shared ligand (L1) sent by two senders to two receivers,
@@ -827,9 +860,9 @@ test_that("uniform and flow_conserving produce different edge values for shared 
   # Both should have the same number of links
   expect_equal(length(uniform_values), length(fc_values))
 
-  # Uniform edge 1 uses raw scaled_activity; flow-conserving edge 1 uses
-  # expression-weighted normalization. So the two methods should produce
-  # different link value vectors overall.
+  # Uniform mode ignores score/expression magnitudes, while flow-conserving
+  # mode uses expression-weighted normalization. The two methods should
+  # produce different link value vectors overall.
   expect_false(identical(uniform_values, fc_values),
     info = "Uniform and flow-conserving should produce different link values for shared ligands")
 })

@@ -25,7 +25,7 @@ CCFlowSettings <- R6::R6Class(
       private$.font_size <- 12L
       private$.fallback_color <- "#A0A0A0"
       private$.default_colormap <- "Set2"
-      private$.verbose <- TRUE
+      private$.verbose <- FALSE
     },
 
     #' @description Get or set display DPI

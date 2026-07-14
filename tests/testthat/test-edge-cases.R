@@ -336,5 +336,5 @@ test_that("settings reset restores all defaults", {
   # Check defaults restored
   expect_equal(ccflow_settings()$dpi(), 100)
   expect_equal(ccflow_settings()$font_size(), 12)
-  expect_true(ccflow_settings()$verbose())
+  expect_false(ccflow_settings()$verbose())
 })

@@ -249,11 +249,14 @@ test_that("SankeyPlot label_style sets font size", {
   expect_s3_class(fig, "plotly")
 })
 
-test_that("SankeyPlot label_style sets position", {
+test_that("SankeyPlot label_style stores unsupported position with warning", {
   ex <- example_communication()
 
   for (pos in c("left", "right", "top", "bottom", "inside")) {
-    plot <- SankeyPlot$new(ex$data, ex$colors)$label_style(position = pos)
+    expect_warning(
+      plot <- SankeyPlot$new(ex$data, ex$colors)$label_style(position = pos),
+      "Label position is not supported"
+    )
     fig <- plot$render()
     expect_s3_class(fig, "plotly")
   }
@@ -395,7 +398,7 @@ test_that("sankey_flow convenience function works", {
 test_that("sankey_flow accepts all customization parameters", {
   ex <- example_communication()
 
-  expect_no_error({
+  expect_warning(
     fig <- sankey_flow(
       ex$data, ex$colors,
       color_by = "sender",
@@ -406,8 +409,9 @@ test_that("sankey_flow accepts all customization parameters", {
       label_size = 18,
       label_position = "top",
       interactive = TRUE
-    )
-  })
+    ),
+    "Label position is not supported"
+  )
 
   expect_s3_class(fig, "plotly")
 })

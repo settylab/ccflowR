@@ -31,13 +31,17 @@ test_that("sankey_plot works without colors", {
 test_that("sankey_plot accepts flow parameter", {
   ex <- example_communication()
 
-  # uniform flow should work without expression columns
+  p <- sankey_plot(ex$data, ex$colors, flow = "auto")
+  expect_s3_class(p, "sankey")
+  expect_equal(summary(p)$flow_method, "flow_conserving")
+
+  p <- sankey_plot(ex$data, ex$colors, flow = "weighted")
+  expect_s3_class(p, "sankey")
+  expect_equal(summary(p)$flow_method, "flow_conserving")
+
   p <- sankey_plot(ex$data, ex$colors, flow = "uniform")
   expect_s3_class(p, "sankey")
-
-  # flow_conserving should fall back to uniform when columns missing
-  p <- sankey_plot(ex$data, ex$colors, flow = "flow_conserving")
-  expect_s3_class(p, "sankey")
+  expect_equal(summary(p)$flow_method, "uniform")
 })
 
 test_that("sankey_plot accepts group_col parameter", {

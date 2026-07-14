@@ -80,12 +80,12 @@ The provided `environment.yml` installs Python `plotly` and `kaleido<1.0`. If st
 | `ligand` | yes | Ligand gene or ligand complex | second plot layer |
 | `receptor` | yes for 4-layer plots | Receptor gene or receptor complex | third plot layer |
 | `receiver` | yes | Cell type or cell state receiving the signal | final plot layer and receiver coloring |
-| `scaled_activity` | optional | Ligand/path activity or prioritization score | flow-conserving edge weights |
+| `scaled_activity` | optional | Ligand/path activity or prioritization score | weighted edge widths |
 | `scaled_ligand_expression` | optional | Sender-side ligand expression or differential expression | sender -> ligand edge weights |
 | `scaled_receptor_expression` | optional | Receiver-side receptor expression or differential expression | receptor -> receiver edge weights |
 | `group` | optional | Condition, sample group, contrast, or time point | multi-condition coloring |
 
-If the three scaled weight columns are present, the default `flow = "flow_conserving"` mode uses them to make edge widths reflect signal strength. If they are absent, `ccflowR` falls back to uniform edge widths so the plot still shows topology.
+By default, `flow = "auto"` uses weighted edge widths when `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression` are all present. If any required weight column is absent, `ccflowR` draws equal-width paths without warning so the plot still shows topology. Use `flow = "weighted"` or `flow = "flow_conserving"` to request weighted widths explicitly, and use `flow = "uniform"` when the plot should show topology only.
 
 For ligand-only displays, set `receptor_col = NULL`; the plot becomes:
 
@@ -174,7 +174,7 @@ See [`notebooks/README.md`](notebooks/README.md) for tutorial-running notes and 
 | Symptom | Likely Cause | What To Try |
 |---------|--------------|-------------|
 | `Missing required columns` | Input table does not use ccflowR column names | Use `read_nichenet()`, `read_multinichenet()`, or pass custom column names to a reader |
-| All flows have equal width | Weight columns are absent or invalid | Add `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`, or use `flow = "uniform"` intentionally |
+| All flows have equal width | Auto mode did not find all weight columns, or uniform mode was requested | Add `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`, or use `flow = "uniform"` intentionally |
 | Static PNG export fails | Kaleido, Python plotly, Chrome, or webshot2 is unavailable | Use the micromamba environment, install `kaleido<1.0` plus Python `plotly`, or configure `webshot2` with Chrome |
 | Jupyter shows no plot | Kernel is not the ccflowR R environment or widget output is hidden | Select `ccflowR R` and use `sankey_display_notebook()` |
 | `RETICULATE_PYTHON` points to a missing Python | R is trying to use a stale Python path | Unset `RETICULATE_PYTHON` or point it to the micromamba environment Python |

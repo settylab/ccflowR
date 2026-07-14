@@ -10,7 +10,7 @@ sankey_plot(
   group_colors = NULL,
   group_col = NULL,
   receptor_col = "receptor",
-  flow = c("flow_conserving", "uniform"),
+  flow = c("auto", "weighted", "flow_conserving", "uniform"),
   ...
 )
 }
@@ -22,9 +22,8 @@ sankey_plot(
 \item{ligand}{Character. Ligand gene symbol.}
 \item{receptor}{Character. (Optional) Receptor gene symbol. If absent and
 \code{receptor_col = NULL}, a 3-layer plot (sender -> ligand -> receiver) is created.}
-\item{scaled_activity}{Numeric. (Optional) Activity score for flow-conserving mode.
-If not provided with other expression columns, falls back to uniform mode.
-}
+\item{scaled_activity}{Numeric. (Optional) Activity score used for
+weighted edge widths when the other required weight columns are also present.}
 }}
 
 \item{colors}{Named character vector of colors for cell types. Names should match
@@ -43,10 +42,13 @@ Default: "receptor".}
 
 \item{flow}{Character. Edge weight computation method:
 \describe{
-\item{"flow_conserving"}{(Default) Edge weights based on expression values.
-Requires \code{scaled_activity} and \code{scaled_receptor_expression} columns.
-Automatically falls back to "uniform" if columns are missing.}
-\item{"uniform"}{Equal weights for all edges. Simpler visualization.}
+\item{"auto"}{(Default) Uses weighted edge widths when the required
+weight columns are present; otherwise uses equal-width edges without warning.}
+\item{"weighted"}{Use expression-weighted edge widths when
+\code{scaled_activity}, \code{scaled_ligand_expression}, and
+\code{scaled_receptor_expression} are present. Equivalent to \code{"flow_conserving"}.}
+\item{"flow_conserving"}{Backward-compatible name for weighted flow.}
+\item{"uniform"}{Equal edge widths for all communication paths.}
 }}
 
 \item{...}{Additional arguments passed to the internal SankeyPlot constructor.}

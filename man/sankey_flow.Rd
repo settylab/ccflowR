@@ -14,7 +14,7 @@ sankey_flow(
   alpha = 0.65,
   label_size = 16,
   label_position = NULL,
-  flow_method = c("flow_conserving", "uniform"),
+  flow_method = c("auto", "weighted", "flow_conserving", "uniform"),
   node_color_mode = c("cell_type", "weighted_mix"),
   interactive = FALSE,
   receptor_col = "receptor",
@@ -43,12 +43,14 @@ fixed color for all flows.}
 
 \item{label_position}{Position of labels (NOTE: not supported by Plotly Sankey - has no effect)}
 
-\item{flow_method}{Edge weight computation method (default: "flow_conserving"):
+\item{flow_method}{Edge weight computation method (default: "auto"):
 \itemize{
-\item "flow_conserving": Distributes flow based on expression weights.
-Requires scaled_activity, scaled_ligand_expression, scaled_receptor_expression columns.
-Automatically falls back to "uniform" if columns are missing.
-\item "uniform": Uses uniform weights (activity value or 1) for all edges.
+\item "auto": Uses weighted flow when required columns are present;
+otherwise uses uniform edge widths without warning.
+\item "weighted"/"flow_conserving": Uses expression-weighted edge widths
+when scaled_activity, scaled_ligand_expression, and scaled_receptor_expression
+columns are present; otherwise uses uniform edge widths.
+\item "uniform": Uses equal edge widths for all communication paths.
 }}
 
 \item{node_color_mode}{Node coloring mode (default: "cell_type"):
@@ -85,18 +87,21 @@ sankey_flow(ex$data, ex$colors,
             title = "Cell Communication",
             alpha = 0.7)
 
-# With labels on top
+# With a smaller label font
 sankey_flow(ex$data, ex$colors,
-            label_position = "top",
             label_size = 14)
 
 # With interactive filters
 sankey_flow(ex$data, ex$colors,
             interactive = TRUE)
 
-# Use uniform weights instead of flow-conserving
+# Use equal-width paths instead of weighted flow
 sankey_flow(ex$data, ex$colors,
             flow_method = "uniform")
+
+# Explicitly request weighted edge widths when weight columns are present
+sankey_flow(ex$data, ex$colors,
+            flow_method = "weighted")
 
 # Use weighted color mixing for ligand/receptor nodes
 sankey_flow(ex$data, ex$colors,

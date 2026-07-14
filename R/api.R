@@ -25,9 +25,8 @@ NULL
 #'     \item{ligand}{Character. Ligand gene symbol.}
 #'     \item{receptor}{Character. (Optional) Receptor gene symbol. If absent and
 #'       `receptor_col = NULL`, a 3-layer plot (sender -> ligand -> receiver) is created.}
-#'     \item{scaled_activity}{Numeric. (Optional) Activity score for flow-conserving mode.
-#'       If not provided with other expression columns, falls back to uniform mode.
-#'     }
+#'     \item{scaled_activity}{Numeric. (Optional) Activity score used for
+#'       weighted edge widths when the other required weight columns are also present.}
 #'   }
 #' @param colors Named character vector of colors for cell types. Names should match
 #'   cell type names in the data. If NULL, colors are auto-generated.
@@ -41,10 +40,13 @@ NULL
 #'   Default: "receptor".
 #' @param flow Character. Edge weight computation method:
 #'   \describe{
-#'     \item{"flow_conserving"}{(Default) Edge weights based on expression values.
-#'       Requires `scaled_activity` and `scaled_receptor_expression` columns.
-#'       Automatically falls back to "uniform" if columns are missing.}
-#'     \item{"uniform"}{Equal weights for all edges. Simpler visualization.}
+#'     \item{"auto"}{(Default) Uses weighted edge widths when the required
+#'       weight columns are present; otherwise uses equal-width edges without warning.}
+#'     \item{"weighted"}{Use expression-weighted edge widths when
+#'       `scaled_activity`, `scaled_ligand_expression`, and
+#'       `scaled_receptor_expression` are present. Equivalent to `"flow_conserving"`.}
+#'     \item{"flow_conserving"}{Backward-compatible name for weighted flow.}
+#'     \item{"uniform"}{Equal edge widths for all communication paths.}
 #'   }
 #' @param ... Additional arguments passed to the internal SankeyPlot constructor.
 #'
@@ -82,7 +84,7 @@ sankey_plot <- function(data,
                         group_colors = NULL,
                         group_col = NULL,
                         receptor_col = "receptor",
-                        flow = c("flow_conserving", "uniform"),
+                        flow = c("auto", "weighted", "flow_conserving", "uniform"),
                         ...) {
 
   flow_explicit <- !missing(flow)
