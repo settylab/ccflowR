@@ -4,7 +4,17 @@
 \alias{validate_sankey_input}
 \title{Validate Sankey Input Data}
 \usage{
-validate_sankey_input(data, require_weights = FALSE, warn = TRUE)
+validate_sankey_input(
+  data,
+  require_weights = FALSE,
+  warn = TRUE,
+  sender_col = "sender",
+  ligand_col = "ligand",
+  receptor_col = "receptor",
+  receiver_col = "receiver",
+  activity_col = "scaled_activity",
+  receptor_expr_col = "scaled_receptor_expression"
+)
 }
 \arguments{
 \item{data}{A data frame with communication data}
@@ -15,6 +25,15 @@ Default: FALSE}
 \item{warn}{Logical. If TRUE, warn about missing or invalid optional weight
 values. Internal auto-mode checks set this to FALSE so plots can quietly
 use uniform edge widths when weights are unavailable. Default: TRUE}
+
+\item{sender_col, ligand_col, receptor_col, receiver_col}{Column names for the
+four displayed layers.}
+
+\item{activity_col}{Activity-score column used directly for sender-to-ligand
+width.}
+
+\item{receptor_expr_col}{Receptor-side weight column used to redistribute
+flow downstream. Ligand expression is not required for edge widths.}
 }
 \value{
 Logical. TRUE if data is valid for the requested mode.

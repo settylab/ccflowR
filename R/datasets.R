@@ -7,7 +7,8 @@ NULL
 #'
 #' @description
 #' Generate an example dataset for demonstrations. Contains 5 cell types
-#' and 15 interactions with expression columns for flow-conserving mode.
+#' and 15 interactions with activity and receptor-side weights for
+#' flow-conserving mode.
 #' Includes shared ligands (TGFB1, TNF, IL6) and shared receptors to
 #' create convergence/divergence patterns in the Sankey diagram, and a
 #' wide weight range to clearly show flow-conserving vs uniform modes.
@@ -97,7 +98,8 @@ example_communication <- function() {
 #' @description
 #' Generate example data with group/condition information, similar to
 #' MultiNicheNet output format. Includes prioritization scores and
-#' differential expression columns for flow-conserving mode.
+#' path-level prioritization scores and differential expression columns for
+#' flow-conserving mode and optional node-color metadata.
 #'
 #' Features condition-specific interactions to demonstrate multi-condition
 #' comparison: Control has 6 core interactions, Treatment adds 3 immune-

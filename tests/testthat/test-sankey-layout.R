@@ -248,15 +248,11 @@ test_that("sankey renders without explicit x/y positions (Plotly auto-arranges)"
     }
   }
 
-  # When x/y are not specified, Plotly uses its auto-arrangement algorithm
-  # This should be NULL or not present for optimal Plotly arrangement
-  # If x/y ARE present, they should be valid (all values between 0 and 1)
-  if (!is.null(sankey_trace$node$x)) {
-    expect_true(all(sankey_trace$node$x >= 0 & sankey_trace$node$x <= 1))
-  }
-  if (!is.null(sankey_trace$node$y)) {
-    expect_true(all(sankey_trace$node$y >= 0 & sankey_trace$node$y <= 1))
-  }
+  # When x/y are omitted, Plotly retains control of node placement. These
+  # assertions prevent custom-order changes from disabling the optimized
+  # no-order code path.
+  expect_null(sankey_trace$node$x)
+  expect_null(sankey_trace$node$y)
 })
 
 # =============================================================================

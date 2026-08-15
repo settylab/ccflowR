@@ -25,8 +25,8 @@ NULL
 #'     \item{ligand}{Character. Ligand gene symbol.}
 #'     \item{receptor}{Character. (Optional) Receptor gene symbol. If absent and
 #'       `receptor_col = NULL`, a 3-layer plot (sender -> ligand -> receiver) is created.}
-#'     \item{scaled_activity}{Numeric. (Optional) Activity score used for
-#'       weighted edge widths when the other required weight columns are also present.}
+#'     \item{scaled_activity}{Numeric. Activity score used directly for
+#'       sender-to-ligand width when weighted flow is active.}
 #'   }
 #' @param colors Named character vector of colors for cell types. Names should match
 #'   cell type names in the data. If NULL, colors are auto-generated.
@@ -38,13 +38,18 @@ NULL
 #' @param receptor_col Name of the receptor column in the data. Set to NULL to omit
 #'   the receptor layer, creating a 3-layer Sankey plot (sender -> ligand -> receiver).
 #'   Default: "receptor".
+#' @param activity_unit_col Optional column identifying rendering rows that
+#'   repeat one score-bearing activity unit. Shared rows divide that activity
+#'   so it contributes exactly once. With `NULL`, every row is an independent
+#'   path-level activity unit.
 #' @param flow Character. Edge weight computation method:
 #'   \describe{
 #'     \item{"auto"}{(Default) Uses weighted edge widths when the required
 #'       weight columns are present; otherwise uses equal-width edges without warning.}
-#'     \item{"weighted"}{Use expression-weighted edge widths when
-#'       `scaled_activity`, `scaled_ligand_expression`, and
-#'       `scaled_receptor_expression` are present. Equivalent to `"flow_conserving"`.}
+#'     \item{"weighted"}{Use `scaled_activity` directly for sender-to-ligand
+#'       width and `scaled_receptor_expression` to redistribute downstream
+#'       flow. `scaled_ligand_expression` is optional metadata and does not
+#'       multiply edge widths. Equivalent to `"flow_conserving"`.}
 #'     \item{"flow_conserving"}{Backward-compatible name for weighted flow.}
 #'     \item{"uniform"}{Equal edge widths for all communication paths.}
 #'   }
@@ -84,6 +89,7 @@ sankey_plot <- function(data,
                         group_colors = NULL,
                         group_col = NULL,
                         receptor_col = "receptor",
+                        activity_unit_col = NULL,
                         flow = c("auto", "weighted", "flow_conserving", "uniform"),
                         ...) {
 
@@ -97,6 +103,7 @@ sankey_plot <- function(data,
     group_colors = group_colors,
     group_col = group_col,
     receptor_col = receptor_col,
+    activity_unit_col = activity_unit_col,
     ...
   )
   if (flow_explicit) {
@@ -478,9 +485,9 @@ sankey_unhighlight <- function() {
 #'   Thicker nodes are more prominent but take more space.
 #' @param padding Vertical padding between nodes in pixels. Default: 30. Range: 10-100.
 #'   More padding spreads nodes apart; less padding creates a denser layout.
-#' @param arrangement Plotly arrangement mode. Default: "fixed" (node order is
-#'   locked, ensuring reproducible layouts). Use "snap" to allow interactive
-#'   dragging of nodes in the browser.
+#' @param arrangement Plotly arrangement mode. The underlying default is
+#'   "snap" when no custom order is supplied. Adding `sankey_order()` switches
+#'   to fixed coordinates so the constrained order is reproducible.
 #'
 #' @return A sankey_layer object
 #' @export
@@ -512,14 +519,21 @@ sankey_nodes <- function(thickness = NULL, padding = NULL, arrangement = NULL) {
 #' Set Custom Node Ordering
 #'
 #' @description
-#' Control the vertical order of nodes within each layer. By default, nodes are
-#' ordered using an activity-weighted barycenter heuristic to minimize link
-#' crossings. Use this function to override with a custom order.
+#' Add relative vertical-order constraints for nodes within each layer. When
+#' this layer is added, constrained mode is the default: ccflowR preserves the
+#' named order while using its activity-weighted barycenter heuristic for the
+#' remaining layout freedom. If this layer is not added, ccflowR continues to
+#' omit explicit positions and lets Plotly arrange the nodes automatically.
 #'
 #' @param senders Character vector specifying order of sender nodes (top to bottom).
 #' @param ligands Character vector specifying order of ligand nodes.
 #' @param receptors Character vector specifying order of receptor nodes.
 #' @param receivers Character vector specifying order of receiver nodes.
+#' @param mode Ordering behavior. `"constrained"` (default) preserves the
+#'   relative order of named nodes and optimizes all remaining nodes and layers
+#'   to reduce crossings. `"fixed"` preserves the historical exact ordering.
+#' @param iterations Positive integer giving the number of forward/reverse
+#'   optimization sweeps in constrained mode.
 #'
 #' @return A sankey_layer object
 #' @export
@@ -534,14 +548,22 @@ sankey_nodes <- function(thickness = NULL, padding = NULL, arrangement = NULL) {
 #'     receivers = c("Fibroblast", "Endothelial", "T_cell")
 #'   )
 sankey_order <- function(senders = NULL, ligands = NULL,
-                         receptors = NULL, receivers = NULL) {
+                         receptors = NULL, receivers = NULL,
+                         mode = c("constrained", "fixed"), iterations = 8L) {
+  mode <- match.arg(mode)
+  if (length(iterations) != 1L || is.na(iterations) ||
+      iterations < 1 || iterations != as.integer(iterations)) {
+    stop("iterations must be a positive integer", call. = FALSE)
+  }
   structure(
     list(
       type = "order",
       senders = senders,
       ligands = ligands,
       receptors = receptors,
-      receivers = receivers
+      receivers = receivers,
+      mode = mode,
+      iterations = as.integer(iterations)
     ),
     class = "sankey_layer"
   )
@@ -905,7 +927,9 @@ apply_layer <- function(plot, layer) {
         senders = layer$senders,
         ligands = layer$ligands,
         receptors = layer$receptors,
-        receivers = layer$receivers
+        receivers = layer$receivers,
+        mode = layer$mode %||% "constrained",
+        iterations = layer$iterations %||% 8L
       )
     },
     labels = {

@@ -135,6 +135,7 @@ test_that("sankey_order creates layer", {
   expect_equal(layer$type, "order")
   expect_equal(layer$senders, c("A", "B"))
   expect_equal(layer$receivers, c("C", "D"))
+  expect_equal(layer$mode, "constrained")
 })
 
 test_that("sankey_labels creates layer", {

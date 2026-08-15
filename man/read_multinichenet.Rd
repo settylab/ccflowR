@@ -34,14 +34,15 @@ read_multinichenet(
 \item{activity_col}{Column name for activity/prioritization scores. Default:
 \code{"prioritization_score"} (the standard MultiNicheNet output column).}
 
-\item{lfc_ligand_col}{Column name for ligand log fold-change. Default:
-\code{"scaled_lfc_ligand"}. Will be mapped to \code{scaled_ligand_expression}.}
+\item{lfc_ligand_col}{Column name for ligand log fold-change metadata.
+Default: \code{"scaled_lfc_ligand"}. Will be mapped to
+\code{scaled_ligand_expression} for optional node-color use.}
 
 \item{lfc_receptor_col}{Column name for receptor log fold-change. Default:
 \code{"scaled_lfc_receptor"}. Will be mapped to \code{scaled_receptor_expression}.}
 
-\item{auto_map}{Logical. If TRUE (default), automatically map MultiNicheNet columns
-to standard flow-conserving column names.}
+\item{auto_map}{Logical. If TRUE (default), automatically map MultiNicheNet
+columns to standard activity and visualization column names.}
 
 \item{sep}{Column separator. Default: \code{NULL} (auto-detect)}
 }
@@ -52,12 +53,14 @@ framework attribute set to "multinichenet"
 \description{
 Read MultiNicheNet analysis output with group/contrast information.
 Automatically maps MultiNicheNet-specific columns (scaled_lfc_ligand, etc.)
-to standard names for flow-conserving edge weight computation.
+to standard activity and visualization columns. Prioritization scores retain
+their path-level meaning for weighted flow.
 }
 \details{
 MultiNicheNet output uses differential expression columns (scaled_lfc_*) rather
 than absolute expression. When \code{auto_map = TRUE}, these are mapped to the
-standard column names expected by the sankey plot:
+standard column names expected by the sankey plot. Ligand expression remains
+optional metadata rather than an edge-width multiplier:
 \itemize{
 \item \code{scaled_lfc_ligand} -> \code{scaled_ligand_expression}
 \item \code{scaled_lfc_receptor} -> \code{scaled_receptor_expression}

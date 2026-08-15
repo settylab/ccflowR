@@ -221,7 +221,7 @@ display_sankey(p)
 |-----------|-------------|---------|-------|
 | `thickness` | Node bar width (px) | 20 | 5–50 |
 | `padding` | Vertical spacing (px) | 30 | 10–100 |
-| `arrangement` | `"fixed"` or `"snap"` (draggable) | `"fixed"` | — |
+| `arrangement` | Plotly arrangement mode; `"snap"` leaves automatic placement active when no custom order is supplied | `"snap"` | — |
 
 ```{r parameter_guide_9, message=TRUE, warning=TRUE}
 p <- sankey_plot(data, celltype_colors) +
@@ -234,7 +234,7 @@ display_sankey(p)
 
 ## Node Order — `sankey_order(...)`
 
-By default, nodes are ordered by an activity-weighted barycenter heuristic. Use `sankey_order()` to set explicit vertical positions.
+Without `sankey_order()`, ccflowR leaves node coordinates unset and Plotly uses its automatic `snap` layout. When an order is supplied, constrained mode preserves the relative sequence of named nodes and deterministically optimizes all remaining layout freedom. Unlisted nodes can therefore appear before, between, or after named nodes. A complete supplied order remains exact.
 
 | Parameter | Description |
 |-----------|-------------|
@@ -242,6 +242,8 @@ By default, nodes are ordered by an activity-weighted barycenter heuristic. Use 
 | `ligands` | Order of ligand nodes |
 | `receptors` | Order of receptor nodes |
 | `receivers` | Order of receiver nodes |
+| `mode` | `"constrained"` (default) for relative constraints, or `"fixed"` for historical exact-leading positions |
+| `iterations` | Number of deterministic forward/reverse optimization sweeps (default: 8) |
 
 ```{r parameter_guide_10, message=TRUE, warning=TRUE}
 p <- sankey_plot(data, celltype_colors) +
@@ -256,6 +258,10 @@ check_equal(tr$arrangement, "fixed", "custom order locks the arrangement")
 check_true(!is.null(tr$node$x) && !is.null(tr$node$y),
            "custom order creates explicit node positions")
 display_sankey(p)
+
+order_layer <- sankey_order(ligands = c("TGFB1", "IL6"))
+check_equal(order_layer$mode, "constrained",
+            "custom order defaults to relative constraints")
 ```
 
 ## Labels — `sankey_labels(size)`
@@ -406,12 +412,12 @@ sankey_pdf(p, "figure.pdf")                             # convenience wrapper
 
 | Function | Key Parameters | Default |
 |----------|---------------|---------|
-| `sankey_plot()` | `colors`, `receptor_col`, `group_col` | 4-layer |
+| `sankey_plot()` | `colors`, `receptor_col`, `group_col`, `activity_unit_col` | 4-layer; path-level activity units |
 | `sankey_colors()` | `by` | `"sender"` |
 | `sankey_alpha()` | `value` | `0.65` |
 | `sankey_highlight()` | `senders`, `ligands`, `receptors`, `receivers`, `dim_alpha` | dim_alpha=0.1 |
-| `sankey_nodes()` | `thickness`, `padding`, `arrangement` | 20, 30, fixed |
-| `sankey_order()` | `senders`, `ligands`, `receptors`, `receivers` | auto (barycenter) |
+| `sankey_nodes()` | `thickness`, `padding`, `arrangement` | 20, 30, snap |
+| `sankey_order()` | `senders`, `ligands`, `receptors`, `receivers`, `mode`, `iterations` | constrained, 8 sweeps |
 | `sankey_labels()` | `size` | 12 |
 | `sankey_interactive()` | — | — |
 | `sankey_node_colors()` | `mode` | `"cell_type"` |
@@ -431,6 +437,6 @@ sankey_pdf(p, "figure.pdf")                             # convenience wrapper
 |-------|----------|
 | "Missing required columns" | Check column names: `sender`, `receiver`, `ligand`, `receptor` |
 | Plot not displaying | Select the `ccflowR R` kernel; use `sankey_display_notebook(p)` in Jupyter |
-| Flows all same thickness | Check that expression columns exist; otherwise defaults to uniform |
+| Flows all same thickness | Check for `scaled_activity` and `scaled_receptor_expression`; ligand expression is not required for weighted flow |
 | Colors not applied | Ensure color vector names match cell type names exactly |
 | Group coloring not working | Pass `group_col = "group"` to `sankey_plot()` |

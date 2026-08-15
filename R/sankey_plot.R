@@ -43,14 +43,22 @@ SankeyPlot <- R6::R6Class(
     #' @param receiver_col Name of receiver column
     #' @param group_col Name of group column (optional)
     #' @param activity_col Name of activity/weight column (optional). Weighted
-    #'   flow uses "scaled_activity" when present.
-    #' @param ligand_expr_col Name of ligand expression column for weighted flow.
-    #'   Default: "scaled_ligand_expression"
-    #' @param receptor_expr_col Name of receptor expression column for weighted flow.
-    #'   Default: "scaled_receptor_expression"
+    #'   flow uses this score directly for sender-to-ligand width and defaults
+    #'   to "scaled_activity" when present.
+    #' @param activity_unit_col Optional column identifying rows that repeat one
+    #'   score-bearing communication unit. Repeated rows sharing an identifier
+    #'   divide that unit's activity so it contributes exactly once. With
+    #'   `NULL` (default), every row is an independent path-level activity unit.
+    #' @param ligand_expr_col Optional ligand expression column used for weighted
+    #'   ligand-node color mixing, not edge widths. Default:
+    #'   "scaled_ligand_expression".
+    #' @param receptor_expr_col Name of the receptor-side weight column used to
+    #'   redistribute ligand and receptor inflow downstream. Default:
+    #'   "scaled_receptor_expression".
     #' @param flow_method Edge weight computation method. "auto" (default) uses
     #'   weighted flow when required weight columns are present and uniform flow otherwise.
-    #'   "weighted" and "flow_conserving" use expression-weighted edge thickness.
+    #'   "weighted" and "flow_conserving" use direct activity-based sender flow
+    #'   with receptor-weighted downstream redistribution.
     #'   "uniform" draws all communication paths with equal edge weights.
     #' @param auto_prepare Logical. If TRUE, automatically detect framework and map
     #'   columns. Default: TRUE
@@ -65,6 +73,7 @@ SankeyPlot <- R6::R6Class(
                           receiver_col = "receiver",
                           group_col = NULL,
                           activity_col = NULL,
+                          activity_unit_col = NULL,
                           ligand_expr_col = "scaled_ligand_expression",
                           receptor_expr_col = "scaled_receptor_expression",
                           flow_method = c("auto", "weighted", "flow_conserving", "uniform"),
@@ -101,6 +110,7 @@ SankeyPlot <- R6::R6Class(
       private$.receptor_col <- receptor_col
       private$.receiver_col <- receiver_col
       private$.group_col <- group_col
+      private$.activity_unit_col <- activity_unit_col
       private$.ligand_expr_col <- ligand_expr_col
       private$.receptor_expr_col <- receptor_expr_col
 
@@ -114,11 +124,27 @@ SankeyPlot <- R6::R6Class(
       }
       private$.activity_col <- activity_col
 
+      if (!is.null(activity_unit_col) &&
+          !(activity_unit_col %in% colnames(data))) {
+        stop("activity_unit_col not found in data: ", activity_unit_col,
+             call. = FALSE)
+      }
+
       # Resolve edge-weighting mode. Auto is intentionally quiet: if users
       # provide all required weight columns, use weighted flow; otherwise draw
       # uniform-width paths so topology can still be inspected.
-      can_flow_conserve <- private$.has_receptor &&
-        validate_sankey_input(data, require_weights = TRUE, warn = FALSE)
+      can_flow_conserve <- private$.has_receptor && !is.null(activity_col) &&
+        validate_sankey_input(
+          data,
+          require_weights = TRUE,
+          warn = FALSE,
+          sender_col = sender_col,
+          ligand_col = ligand_col,
+          receptor_col = receptor_col,
+          receiver_col = receiver_col,
+          activity_col = activity_col,
+          receptor_expr_col = receptor_expr_col
+        )
 
       if (flow_method == "auto") {
         flow_method <- if (can_flow_conserve) "flow_conserving" else "uniform"
@@ -153,6 +179,8 @@ SankeyPlot <- R6::R6Class(
       private$.orientation <- "h"  # horizontal
       private$.arrangement <- "snap"
       private$.node_order <- NULL
+      private$.order_mode <- "constrained"
+      private$.order_iterations <- 8L
       private$.highlight_pathway <- NULL
       private$.highlight_alpha <- 0.1
       private$.show_legend <- TRUE
@@ -230,8 +258,8 @@ SankeyPlot <- R6::R6Class(
     #' @description Configure node appearance
     #' @param thickness Node thickness in pixels
     #' @param padding Padding between nodes
-    #' @param arrangement Plotly arrangement mode: "fixed" (default, preserves node
-    #'   order), or "snap" (allows interactive dragging).
+    #' @param arrangement Plotly arrangement mode. The default is "snap" when
+    #'   no custom order is supplied; custom ordering uses fixed coordinates.
     #' @return Self (invisibly) for chaining
     nodes = function(thickness = NULL, padding = NULL, arrangement = NULL) {
       if (!is.null(thickness)) private$.node_thickness <- thickness
@@ -248,8 +276,22 @@ SankeyPlot <- R6::R6Class(
     #' @param ligands Order of ligand nodes
     #' @param receptors Order of receptor nodes
     #' @param receivers Order of receiver nodes
+    #' @param mode Ordering mode. `"constrained"` (default) treats supplied
+    #'   vectors as relative order constraints and optimizes all remaining
+    #'   freedom with repeated activity-weighted barycenter sweeps. `"fixed"`
+    #'   preserves the historical behavior: each supplied vector is placed
+    #'   exactly at the top of its layer, followed by unlisted nodes.
+    #' @param iterations Number of forward/reverse sweeps used in constrained
+    #'   mode.
     #' @return Self (invisibly) for chaining
-    node_order = function(senders = NULL, ligands = NULL, receptors = NULL, receivers = NULL) {
+    node_order = function(senders = NULL, ligands = NULL, receptors = NULL,
+                          receivers = NULL,
+                          mode = c("constrained", "fixed"), iterations = 8L) {
+      mode <- match.arg(mode)
+      if (length(iterations) != 1L || is.na(iterations) ||
+          iterations < 1 || iterations != as.integer(iterations)) {
+        stop("iterations must be a positive integer", call. = FALSE)
+      }
       if (!private$.has_receptor && !is.null(receptors)) {
         warning("receptors ordering ignored: receptor layer is not displayed", call. = FALSE)
         receptors <- NULL
@@ -260,6 +302,8 @@ SankeyPlot <- R6::R6Class(
         receptors = receptors,
         receivers = receivers
       )
+      private$.order_mode <- mode
+      private$.order_iterations <- as.integer(iterations)
       # Lock positions when custom order is specified, so Plotly
       # doesn't rearrange nodes and override the user's order
       if (!is.null(senders) || !is.null(ligands) || !is.null(receptors) || !is.null(receivers)) {
@@ -362,21 +406,32 @@ SankeyPlot <- R6::R6Class(
     #' @param method One of "auto", "weighted", "flow_conserving", or "uniform".
     #'   - "auto": Uses weighted flow when required columns are present;
     #'     otherwise uses uniform edge widths without warning.
-    #'   - "weighted"/"flow_conserving": Uses expression-weighted edge widths
-    #'     when scaled_activity, scaled_ligand_expression, and
-    #'     scaled_receptor_expression are present; otherwise uses uniform widths.
+    #'   - "weighted"/"flow_conserving": Uses scaled_activity directly for
+    #'     sender-to-ligand width and scaled_receptor_expression to redistribute
+    #'     flow downstream. Ligand expression is not an edge-width multiplier.
     #'   - "uniform": Uses equal edge widths for all communication paths.
     #' @return Self (invisibly) for chaining
     #' @examples
     #' plot$flow_method("uniform")  # Draw equal-width paths
-    #' plot$flow_method("weighted")  # Use expression-weighted flow when available
+    #' plot$flow_method("weighted")  # Use direct activity and receptor-side weights
     flow_method = function(method = c("auto", "weighted", "flow_conserving", "uniform")) {
       method <- match.arg(method)
       requested_method <- method
       if (method == "weighted") method <- "flow_conserving"
 
       can_flow_conserve <- private$.has_receptor &&
-        validate_sankey_input(private$.data, require_weights = TRUE, warn = FALSE)
+        !is.null(private$.activity_col) &&
+        validate_sankey_input(
+          private$.data,
+          require_weights = TRUE,
+          warn = FALSE,
+          sender_col = private$.sender_col,
+          ligand_col = private$.ligand_col,
+          receptor_col = private$.receptor_col,
+          receiver_col = private$.receiver_col,
+          activity_col = private$.activity_col,
+          receptor_expr_col = private$.receptor_expr_col
+        )
 
       if (method == "auto") {
         method <- if (can_flow_conserve) "flow_conserving" else "uniform"
@@ -516,7 +571,8 @@ SankeyPlot <- R6::R6Class(
         alpha = private$.alpha,
         dimensions = c(width = private$.width, height = private$.height),
         flow_method = private$.flow_method,
-        requested_flow_method = private$.requested_flow_method
+        requested_flow_method = private$.requested_flow_method,
+        activity_unit_col = private$.activity_unit_col
       )
       if (private$.has_receptor) {
         result$n_receptors <- length(unique(data[[private$.receptor_col]]))
@@ -532,6 +588,7 @@ SankeyPlot <- R6::R6Class(
     .receiver_col = NULL,
     .group_col = NULL,
     .activity_col = NULL,
+    .activity_unit_col = NULL,
     .ligand_expr_col = NULL,
     .receptor_expr_col = NULL,
     .has_receptor = NULL,       # TRUE = 4-layer (S->L->R->T), FALSE = 3-layer (S->L->T)
@@ -550,6 +607,8 @@ SankeyPlot <- R6::R6Class(
     .arrangement = NULL,
     .orientation = NULL,
     .node_order = NULL,
+    .order_mode = NULL,
+    .order_iterations = NULL,
     .highlight_pathway = NULL,
     .highlight_alpha = NULL,
     .show_legend = NULL,
@@ -557,6 +616,63 @@ SankeyPlot <- R6::R6Class(
     .label_font_size = NULL,
     .label_position = NULL,
     .interactive_filter = NULL,
+
+    # Return the nonnegative activity contribution represented by each row.
+    # By default every row is an independent path-level unit. When an explicit
+    # activity-unit column is supplied, repeated rendering rows divide one
+    # shared score so receptor expansion cannot multiply sender flow.
+    .activity_row_values = function(data) {
+      if (is.null(private$.activity_col) ||
+          !(private$.activity_col %in% colnames(data))) {
+        return(rep(1, nrow(data)))
+      }
+
+      activity <- suppressWarnings(as.numeric(data[[private$.activity_col]]))
+      activity[!is.finite(activity) | activity <= 0] <- 0
+
+      if (is.null(private$.activity_unit_col)) {
+        return(activity)
+      }
+
+      unit_values <- as.character(data[[private$.activity_unit_col]])
+      missing_unit <- is.na(unit_values) | !nzchar(unit_values)
+      unit_keys <- paste0("unit:", unit_values)
+      unit_keys[missing_unit] <- paste0("row:", which(missing_unit))
+      unit_rows <- split(seq_len(nrow(data)), unit_keys)
+      contributions <- numeric(nrow(data))
+
+      for (rows in unit_rows) {
+        if (length(rows) > 1L) {
+          sender_ligand <- paste(
+            data[[private$.sender_col]][rows],
+            data[[private$.ligand_col]][rows],
+            sep = " -> "
+          )
+          if (length(unique(sender_ligand)) != 1L) {
+            stop(
+              "Each activity unit must map to one sender-ligand pair; unit '",
+              unit_values[[rows[[1L]]]], "' spans multiple pairs.",
+              call. = FALSE
+            )
+          }
+
+          unit_activity <- activity[rows]
+          tolerance <- sqrt(.Machine$double.eps) *
+            max(1, abs(unit_activity))
+          if (max(unit_activity) - min(unit_activity) > tolerance) {
+            stop(
+              "Rows sharing activity unit '", unit_values[[rows[[1L]]]],
+              "' have inconsistent activity scores.",
+              call. = FALSE
+            )
+          }
+        }
+
+        contributions[rows] <- activity[[rows[[1L]]]] / length(rows)
+      }
+
+      contributions
+    },
 
     # Build Sankey data structure for plotly
     .build_sankey_data = function() {
@@ -576,8 +692,8 @@ SankeyPlot <- R6::R6Class(
         !sapply(private$.node_order, is.null))
 
       if (has_custom_order) {
-        # Custom order specified: use multi-pass barycenter + explicit positions
-        # Pass 1: Forward (left to right)
+        # Custom order specified: compute deterministic positions in R and
+        # render them with Plotly's fixed arrangement.
         senders <- private$.order_layer("senders", raw_senders, NULL, data)
         ligands <- private$.order_layer("ligands", raw_ligands, senders, data)
 
@@ -585,28 +701,54 @@ SankeyPlot <- R6::R6Class(
           receptors <- private$.order_layer("receptors", raw_receptors, ligands, data)
           receivers <- private$.order_layer("receivers", raw_receivers, receptors, data)
 
-          # Pass 2: Reverse (right to left)
-          receptors <- private$.refine_order("receptors", receptors, receivers, data,
-                                              receptor_col, receiver_col)
-          ligands <- private$.refine_order("ligands", ligands, receptors, data,
-                                            ligand_col, receptor_col)
-
-          # Pass 3: Forward again
-          receptors <- private$.refine_order("receptors", receptors, ligands, data,
-                                              receptor_col, ligand_col)
-          receivers <- private$.refine_order("receivers", receivers, receptors, data,
-                                              receiver_col, receptor_col)
+          if (identical(private$.order_mode, "fixed")) {
+            # Backward-compatible three-pass behavior. Fully specified layers
+            # remain fixed; only unspecified layers are refined.
+            receptors <- private$.refine_order("receptors", receptors, receivers, data,
+                                                receptor_col, receiver_col)
+            ligands <- private$.refine_order("ligands", ligands, receptors, data,
+                                              ligand_col, receptor_col)
+            receptors <- private$.refine_order("receptors", receptors, ligands, data,
+                                                receptor_col, ligand_col)
+            receivers <- private$.refine_order("receivers", receivers, receptors, data,
+                                                receiver_col, receptor_col)
+          } else {
+            optimized <- private$.optimize_constrained_order(
+              list(
+                senders = senders,
+                ligands = ligands,
+                receptors = receptors,
+                receivers = receivers
+              ),
+              data
+            )
+            senders <- optimized$senders
+            ligands <- optimized$ligands
+            receptors <- optimized$receptors
+            receivers <- optimized$receivers
+          }
         } else {
           receptors <- character(0)
           receivers <- private$.order_layer("receivers", raw_receivers, ligands, data)
 
-          # Pass 2: Reverse
-          ligands <- private$.refine_order("ligands", ligands, receivers, data,
-                                            ligand_col, receiver_col)
-
-          # Pass 3: Forward
-          receivers <- private$.refine_order("receivers", receivers, ligands, data,
-                                              receiver_col, ligand_col)
+          if (identical(private$.order_mode, "fixed")) {
+            ligands <- private$.refine_order("ligands", ligands, receivers, data,
+                                              ligand_col, receiver_col)
+            receivers <- private$.refine_order("receivers", receivers, ligands, data,
+                                                receiver_col, ligand_col)
+          } else {
+            optimized <- private$.optimize_constrained_order(
+              list(
+                senders = senders,
+                ligands = ligands,
+                receivers = receivers
+              ),
+              data
+            )
+            senders <- optimized$senders
+            ligands <- optimized$ligands
+            receivers <- optimized$receivers
+          }
         }
       } else {
         # No custom order: use data order; Plotly handles layout optimization
@@ -717,6 +859,59 @@ SankeyPlot <- R6::R6Class(
       nodes
     },
 
+    # Apply a chain of relative-order constraints while otherwise retaining the
+    # optimizer's candidate order. A stable priority topological sort allows
+    # unnamed nodes to fall before, between, or after constrained nodes.
+    .apply_relative_constraints = function(nodes, constraints) {
+      nodes <- unique(nodes)
+      anchors <- unique(constraints[constraints %in% nodes])
+      if (length(nodes) <= 1 || length(anchors) <= 1) return(nodes)
+
+      priority <- stats::setNames(seq_along(nodes), nodes)
+      indegree <- stats::setNames(integer(length(nodes)), nodes)
+      successors <- stats::setNames(vector("list", length(nodes)), nodes)
+
+      for (i in seq_len(length(anchors) - 1L)) {
+        before <- anchors[[i]]
+        after <- anchors[[i + 1L]]
+        successors[[before]] <- unique(c(successors[[before]], after))
+        indegree[[after]] <- indegree[[after]] + 1L
+      }
+
+      available <- nodes[indegree[nodes] == 0L]
+      ordered <- character(0)
+      while (length(available) > 0) {
+        pick_index <- which.min(priority[available])
+        pick <- available[[pick_index]]
+        available <- available[-pick_index]
+        ordered <- c(ordered, pick)
+
+        for (next_node in successors[[pick]]) {
+          indegree[[next_node]] <- indegree[[next_node]] - 1L
+          if (indegree[[next_node]] == 0L) {
+            available <- unique(c(available, next_node))
+          }
+        }
+      }
+
+      if (length(ordered) != length(nodes)) {
+        stop("Internal error: node-order constraints contain a cycle", call. = FALSE)
+      }
+      ordered
+    },
+
+    .apply_layer_constraints = function(layer_type, nodes) {
+      if (!identical(private$.order_mode, "constrained") ||
+          is.null(private$.node_order) ||
+          is.null(private$.node_order[[layer_type]])) {
+        return(nodes)
+      }
+      private$.apply_relative_constraints(
+        nodes,
+        private$.node_order[[layer_type]]
+      )
+    },
+
     # Determine node order for a layer: custom order or barycenter optimization.
     # Custom order (via sankey_order()) takes priority. When no custom order is
     # specified, uses activity-weighted barycenter heuristic to minimize link crossings:
@@ -724,8 +919,10 @@ SankeyPlot <- R6::R6Class(
     #   - Subsequent layers: ordered by weighted mean rank of connected previous-layer
     #     nodes, where weights are the activity values of each connection
     .order_layer = function(layer_type, nodes, prev_nodes, data) {
-      # Use custom order if specified by user
-      if (!is.null(private$.node_order) && !is.null(private$.node_order[[layer_type]])) {
+      # Fixed mode retains the original exact custom-order behavior.
+      if (identical(private$.order_mode, "fixed") &&
+          !is.null(private$.node_order) &&
+          !is.null(private$.node_order[[layer_type]])) {
         return(private$.get_ordered_nodes(layer_type, nodes))
       }
 
@@ -733,6 +930,11 @@ SankeyPlot <- R6::R6Class(
 
       activity_col <- private$.activity_col
       has_activity <- !is.null(activity_col) && activity_col %in% colnames(data)
+      activity_values <- if (has_activity) {
+        private$.activity_row_values(data)
+      } else {
+        rep(1, nrow(data))
+      }
 
       # First layer (senders): order by total activity (descending),
       # or alphabetically when no activity column is available
@@ -740,12 +942,13 @@ SankeyPlot <- R6::R6Class(
         if (has_activity) {
           sender_col <- private$.sender_col
           total_act <- vapply(nodes, function(n) {
-            vals <- data[[activity_col]][data[[sender_col]] == n]
-            sum(abs(as.numeric(vals)), na.rm = TRUE)
+            vals <- activity_values[data[[sender_col]] == n]
+            sum(vals, na.rm = TRUE)
           }, numeric(1))
-          return(nodes[order(total_act, decreasing = TRUE)])
+          candidate <- nodes[order(-total_act, seq_along(nodes))]
+          return(private$.apply_layer_constraints(layer_type, candidate))
         }
-        return(sort(nodes))
+        return(private$.apply_layer_constraints(layer_type, sort(nodes)))
       }
 
       # Subsequent layers: activity-weighted barycenter of connected
@@ -776,7 +979,7 @@ SankeyPlot <- R6::R6Class(
         ranks <- prev_rank[prev_vals]
 
         if (has_activity) {
-          weights <- abs(as.numeric(data[[activity_col]][mask]))
+          weights <- activity_values[mask]
           # Match weights to the filtered prev_vals
           weights <- weights[data[[cols["prev"]]][mask] %in% names(prev_rank)]
           weights[is.na(weights)] <- 1
@@ -787,15 +990,18 @@ SankeyPlot <- R6::R6Class(
         mean(ranks)
       }, numeric(1))
 
-      nodes[order(barycenters)]
+      candidate <- nodes[order(barycenters, seq_along(nodes))]
+      private$.apply_layer_constraints(layer_type, candidate)
     },
 
     # Refine node order using barycenter with an arbitrary reference layer.
     # Used for reverse passes (right-to-left) and additional forward passes.
     # Takes explicit column names so it works in either direction.
     .refine_order = function(layer_type, nodes, ref_nodes, data, curr_col, ref_col) {
-      # Don't change layers with custom order
-      if (!is.null(private$.node_order) && !is.null(private$.node_order[[layer_type]])) {
+      # Don't change custom-ordered layers in backward-compatible fixed mode.
+      if (identical(private$.order_mode, "fixed") &&
+          !is.null(private$.node_order) &&
+          !is.null(private$.node_order[[layer_type]])) {
         return(nodes)
       }
       if (length(nodes) <= 1) return(nodes)
@@ -803,6 +1009,11 @@ SankeyPlot <- R6::R6Class(
       ref_rank <- setNames(seq_along(ref_nodes), ref_nodes)
       activity_col <- private$.activity_col
       has_activity <- !is.null(activity_col) && activity_col %in% colnames(data)
+      activity_values <- if (has_activity) {
+        private$.activity_row_values(data)
+      } else {
+        rep(1, nrow(data))
+      }
 
       barycenters <- vapply(nodes, function(n) {
         mask <- data[[curr_col]] == n
@@ -813,7 +1024,7 @@ SankeyPlot <- R6::R6Class(
         ranks <- ref_rank[ref_vals]
 
         if (has_activity) {
-          weights <- abs(as.numeric(data[[activity_col]][mask]))
+          weights <- activity_values[mask]
           weights <- weights[data[[ref_col]][mask] %in% names(ref_rank)]
           weights[is.na(weights)] <- 1
           weights <- pmax(weights, 1e-6)
@@ -823,7 +1034,125 @@ SankeyPlot <- R6::R6Class(
         mean(ranks)
       }, numeric(1))
 
-      nodes[order(barycenters)]
+      candidate <- nodes[order(barycenters, seq_along(nodes))]
+      private$.apply_layer_constraints(layer_type, candidate)
+    },
+
+    # Repeat forward/reverse barycenter sweeps, retain the candidate with the
+    # smallest activity-weighted adjacent-layer crossing score, and apply the
+    # user's relative-order constraints after every layer update.
+    .optimize_constrained_order = function(orders, data) {
+      best <- orders
+      best_score <- private$.crossing_score(best, data)
+
+      for (iteration in seq_len(private$.order_iterations)) {
+        if (private$.has_receptor) {
+          orders$receptors <- private$.refine_order(
+            "receptors", orders$receptors, orders$receivers, data,
+            private$.receptor_col, private$.receiver_col
+          )
+          orders$ligands <- private$.refine_order(
+            "ligands", orders$ligands, orders$receptors, data,
+            private$.ligand_col, private$.receptor_col
+          )
+          orders$senders <- private$.refine_order(
+            "senders", orders$senders, orders$ligands, data,
+            private$.sender_col, private$.ligand_col
+          )
+
+          orders$ligands <- private$.refine_order(
+            "ligands", orders$ligands, orders$senders, data,
+            private$.ligand_col, private$.sender_col
+          )
+          orders$receptors <- private$.refine_order(
+            "receptors", orders$receptors, orders$ligands, data,
+            private$.receptor_col, private$.ligand_col
+          )
+          orders$receivers <- private$.refine_order(
+            "receivers", orders$receivers, orders$receptors, data,
+            private$.receiver_col, private$.receptor_col
+          )
+        } else {
+          orders$ligands <- private$.refine_order(
+            "ligands", orders$ligands, orders$receivers, data,
+            private$.ligand_col, private$.receiver_col
+          )
+          orders$senders <- private$.refine_order(
+            "senders", orders$senders, orders$ligands, data,
+            private$.sender_col, private$.ligand_col
+          )
+          orders$ligands <- private$.refine_order(
+            "ligands", orders$ligands, orders$senders, data,
+            private$.ligand_col, private$.sender_col
+          )
+          orders$receivers <- private$.refine_order(
+            "receivers", orders$receivers, orders$ligands, data,
+            private$.receiver_col, private$.ligand_col
+          )
+        }
+
+        score <- private$.crossing_score(orders, data)
+        if (is.finite(score) && score < best_score) {
+          best <- orders
+          best_score <- score
+        }
+      }
+      best
+    },
+
+    # Activity-weighted number of crossings between every pair of adjacent
+    # layers. Links sharing a source or target are not counted as crossings.
+    .crossing_score = function(orders, data) {
+      layer_pairs <- if (private$.has_receptor) {
+        list(
+          list(left = "senders", right = "ligands",
+               left_col = private$.sender_col, right_col = private$.ligand_col),
+          list(left = "ligands", right = "receptors",
+               left_col = private$.ligand_col, right_col = private$.receptor_col),
+          list(left = "receptors", right = "receivers",
+               left_col = private$.receptor_col, right_col = private$.receiver_col)
+        )
+      } else {
+        list(
+          list(left = "senders", right = "ligands",
+               left_col = private$.sender_col, right_col = private$.ligand_col),
+          list(left = "ligands", right = "receivers",
+               left_col = private$.ligand_col, right_col = private$.receiver_col)
+        )
+      }
+
+      row_weights <- rep(1, nrow(data))
+      if (!is.null(private$.activity_col) &&
+          private$.activity_col %in% colnames(data)) {
+        row_weights <- private$.activity_row_values(data)
+      }
+
+      pair_score <- function(pair) {
+        edges <- data.frame(
+          left = match(data[[pair$left_col]], orders[[pair$left]]),
+          right = match(data[[pair$right_col]], orders[[pair$right]]),
+          weight = row_weights
+        )
+        edges <- edges[stats::complete.cases(edges), , drop = FALSE]
+        if (nrow(edges) <= 1) return(0)
+        edges <- stats::aggregate(weight ~ left + right, edges, sum)
+        edges <- edges[order(edges$left, edges$right), , drop = FALSE]
+        if (nrow(edges) <= 1) return(0)
+
+        score <- 0
+        for (i in seq_len(nrow(edges) - 1L)) {
+          later <- seq.int(i + 1L, nrow(edges))
+          crossing <- edges$left[later] > edges$left[[i]] &
+            edges$right[later] < edges$right[[i]]
+          if (any(crossing)) {
+            score <- score + edges$weight[[i]] *
+              sum(edges$weight[later][crossing])
+          }
+        }
+        score
+      }
+
+      sum(vapply(layer_pairs, pair_score, numeric(1)))
     },
 
     # Calculate flow-proportional Y positions for each layer.
@@ -1046,174 +1375,83 @@ SankeyPlot <- R6::R6Class(
       )
     },
 
-    # Build links with flow-conserving weights
-    # This method properly distributes flow based on expression levels:
-    # - Edge 1 (Sender->Ligand): value = scaled_activity
-    # - Edge 2 (Ligand->Receptor): value = scaled_receptor_expression * ligand_total_in / weight_norm_sum
-    # - Edge 3 (Receptor->Receiver): value = scaled_receptor_expression * receptor_total_in / weight_norm_sum
+    # Build links with direct activity-based, flow-conserving weights.
+    # Each score-bearing unit contributes its activity exactly once to the
+    # sender-to-ligand layer. Ligand expression is deliberately absent from
+    # edge-width calculations. Receptor-side weights redistribute inflow at
+    # intermediate nodes without changing their total flow.
     .build_links_flow_conserving = function(data, node_idx, senders, ligands, receptors, receivers) {
       if (!private$.has_receptor) {
         stop("flow_conserving requires receptor column", call. = FALSE)
       }
+
       sender_col <- private$.sender_col
       ligand_col <- private$.ligand_col
       receptor_col <- private$.receptor_col
       receiver_col <- private$.receiver_col
-      activity_col <- private$.activity_col
-      ligand_expr_col <- private$.ligand_expr_col
       receptor_expr_col <- private$.receptor_expr_col
 
-      # Initialize link vectors
-      row_ids <- c()
-      sources <- c()
-      targets <- c()
-      values <- c()
-      colors <- c()
+      # Sender -> ligand values are the direct activity contribution represented
+      # by each row. Shared activity units divide one score across their repeated
+      # rendering rows; path-scoped rows retain their individual scores.
+      edge1_values <- private$.activity_row_values(data)
 
-      # --- Step 1: Compute Edge 1 (Sender -> Ligand) values ---
-      # Use ligand expression with per-sender normalization so that within
-      # each sender, relative edge weights to ligands reflect expression levels.
-      # Total outflow per sender is preserved at sum(scaled_activity).
-      has_ligand_expr <- !is.null(ligand_expr_col) && ligand_expr_col %in% colnames(data)
-      has_activity <- !is.null(activity_col) && activity_col %in% colnames(data)
+      receptor_weights <- if (!is.null(receptor_expr_col) &&
+                              receptor_expr_col %in% colnames(data)) {
+        suppressWarnings(as.numeric(data[[receptor_expr_col]]))
+      } else {
+        rep(1, nrow(data))
+      }
+      receptor_weights[
+        !is.finite(receptor_weights) | receptor_weights < 0
+      ] <- 0
 
-      # Step 1a: Collect per-(sender, ligand) expression and row counts
-      sender_ligand_info <- list()
-      sender_expr_sum <- list()
-      sender_total_activity <- list()
+      # Redistribute the total incoming flow for each intermediate node across
+      # its outgoing rendering rows. When all selected weights are zero or
+      # missing, use an equal split so conservation still holds exactly.
+      distribute_inflow <- function(incoming, groups, downstream_weights) {
+        values <- numeric(length(incoming))
+        group_keys <- as.character(groups)
+        missing_group <- is.na(group_keys)
+        group_keys[missing_group] <- paste0(
+          "missing:", which(missing_group)
+        )
+        rows_by_group <- split(seq_along(group_keys), group_keys)
 
-      for (i in seq_len(nrow(data))) {
-        sender <- data[[sender_col]][i]
-        ligand <- data[[ligand_col]][i]
-        sl_key <- paste(sender, ligand, sep = "|||")
+        for (rows in rows_by_group) {
+          total_in <- sum(incoming[rows])
+          weights <- downstream_weights[rows]
+          weight_sum <- sum(weights)
 
-        # Accumulate activity for sender total
-        act_val <- if (has_activity) as.numeric(data[[activity_col]][i]) else 1
-        if (is.na(act_val) || act_val <= 0) act_val <- 1
-        if (is.null(sender_total_activity[[sender]])) sender_total_activity[[sender]] <- 0
-        sender_total_activity[[sender]] <- sender_total_activity[[sender]] + act_val
-
-        # Track unique (sender, ligand) pairs
-        if (is.null(sender_ligand_info[[sl_key]])) {
-          lexpr <- if (has_ligand_expr) as.numeric(data[[ligand_expr_col]][i]) else 1
-          if (is.na(lexpr) || lexpr <= 0) lexpr <- 1e-4
-          sender_ligand_info[[sl_key]] <- list(expr = lexpr, nrows = 0L)
-
-          if (is.null(sender_expr_sum[[sender]])) sender_expr_sum[[sender]] <- 0
-          sender_expr_sum[[sender]] <- sender_expr_sum[[sender]] + lexpr
+          if (!is.finite(total_in) || total_in <= 0) {
+            values[rows] <- 0
+          } else if (is.finite(weight_sum) && weight_sum > 0) {
+            values[rows] <- total_in * weights / weight_sum
+          } else {
+            values[rows] <- total_in / length(rows)
+          }
         }
-        sender_ligand_info[[sl_key]]$nrows <- sender_ligand_info[[sl_key]]$nrows + 1L
+
+        values
       }
 
-      # Step 1b: Compute per-row Edge 1 values
-      # Visual total from sender S to ligand L = (expr / sender_expr_sum) * sender_total
-      # Per-row value divides by n_rows for that (S, L) pair
-      edge1_values <- list()
-      for (i in seq_len(nrow(data))) {
-        sender <- data[[sender_col]][i]
-        ligand <- data[[ligand_col]][i]
-        sl_key <- paste(sender, ligand, sep = "|||")
+      edge2_values <- distribute_inflow(
+        edge1_values,
+        data[[ligand_col]],
+        receptor_weights
+      )
+      edge3_values <- distribute_inflow(
+        edge2_values,
+        data[[receptor_col]],
+        receptor_weights
+      )
 
-        info <- sender_ligand_info[[sl_key]]
-        expr_sum <- sender_expr_sum[[sender]]
-        total_act <- sender_total_activity[[sender]]
+      row_ids <- integer(0)
+      sources <- integer(0)
+      targets <- integer(0)
+      values <- numeric(0)
+      colors <- character(0)
 
-        value <- (info$expr / expr_sum) * total_act / info$nrows
-
-        key <- paste(sender, ligand, i, sep = "|||")
-        edge1_values[[key]] <- value
-      }
-
-      # --- Step 2: Compute ligand total inflow ---
-      ligand_total_in <- list()
-      for (i in seq_len(nrow(data))) {
-        row <- data[i, ]
-        ligand <- row[[ligand_col]]
-        key <- paste(row[[sender_col]], ligand, i, sep = "|||")
-        val <- edge1_values[[key]]
-
-        if (is.null(ligand_total_in[[ligand]])) {
-          ligand_total_in[[ligand]] <- 0
-        }
-        ligand_total_in[[ligand]] <- ligand_total_in[[ligand]] + val
-      }
-
-      # --- Step 3: Compute Edge 2 (Ligand -> Receptor) normalization factors ---
-      # Group by ligand to compute weight_norm_sum
-      ligand_weight_norm_sum <- list()
-      for (i in seq_len(nrow(data))) {
-        row <- data[i, ]
-        ligand <- row[[ligand_col]]
-
-        receptor_expr <- if (!is.null(receptor_expr_col) && receptor_expr_col %in% colnames(data)) {
-          as.numeric(row[[receptor_expr_col]])
-        } else {
-          1
-        }
-        if (is.na(receptor_expr)) receptor_expr <- 0
-
-        if (is.null(ligand_weight_norm_sum[[ligand]])) {
-          ligand_weight_norm_sum[[ligand]] <- 0
-        }
-        ligand_weight_norm_sum[[ligand]] <- ligand_weight_norm_sum[[ligand]] + receptor_expr
-      }
-
-      # --- Step 4: Compute Edge 2 values and receptor total inflow ---
-      edge2_values <- list()
-      receptor_total_in <- list()
-      for (i in seq_len(nrow(data))) {
-        row <- data[i, ]
-        ligand <- row[[ligand_col]]
-        receptor <- row[[receptor_col]]
-
-        receptor_expr <- if (!is.null(receptor_expr_col) && receptor_expr_col %in% colnames(data)) {
-          as.numeric(row[[receptor_expr_col]])
-        } else {
-          1
-        }
-        if (is.na(receptor_expr)) receptor_expr <- 0
-
-        total_in <- ligand_total_in[[ligand]]
-        weight_sum <- ligand_weight_norm_sum[[ligand]]
-
-        # Compute normalized edge value
-        edge2_val <- if (is.null(total_in) || is.null(weight_sum) || weight_sum == 0) {
-          1e-6  # Minimal edge weight (preserves flow conservation)
-        } else {
-          receptor_expr * total_in / weight_sum
-        }
-        if (edge2_val <= 0) edge2_val <- 1e-6  # Minimal edge weight (preserves flow conservation)
-
-        key <- paste(ligand, receptor, i, sep = "|||")
-        edge2_values[[key]] <- edge2_val
-
-        # Accumulate receptor total inflow
-        if (is.null(receptor_total_in[[receptor]])) {
-          receptor_total_in[[receptor]] <- 0
-        }
-        receptor_total_in[[receptor]] <- receptor_total_in[[receptor]] + edge2_val
-      }
-
-      # --- Step 5: Compute Edge 3 (Receptor -> Receiver) normalization factors ---
-      receptor_weight_norm_sum <- list()
-      for (i in seq_len(nrow(data))) {
-        row <- data[i, ]
-        receptor <- row[[receptor_col]]
-
-        receptor_expr <- if (!is.null(receptor_expr_col) && receptor_expr_col %in% colnames(data)) {
-          as.numeric(row[[receptor_expr_col]])
-        } else {
-          1
-        }
-        if (is.na(receptor_expr)) receptor_expr <- 0
-
-        if (is.null(receptor_weight_norm_sum[[receptor]])) {
-          receptor_weight_norm_sum[[receptor]] <- 0
-        }
-        receptor_weight_norm_sum[[receptor]] <- receptor_weight_norm_sum[[receptor]] + receptor_expr
-      }
-
-      # --- Step 6: Build all edges ---
       for (i in seq_len(nrow(data))) {
         row <- data[i, ]
         sender <- row[[sender_col]]
@@ -1221,56 +1459,29 @@ SankeyPlot <- R6::R6Class(
         receptor <- row[[receptor_col]]
         receiver <- row[[receiver_col]]
 
-        # Get receptor expression for Edge 3 calculation
-        receptor_expr <- if (!is.null(receptor_expr_col) && receptor_expr_col %in% colnames(data)) {
-          as.numeric(row[[receptor_expr_col]])
-        } else {
-          1
-        }
-        if (is.na(receptor_expr)) receptor_expr <- 0
-
-        # Get color for this flow
         flow_color <- private$.get_flow_color(row, i)
-
-        # Check if this flow should be highlighted
         alpha <- private$.get_flow_alpha(sender, ligand, receptor, receiver)
         rgba_color <- hex_with_alpha(flow_color, alpha)
 
-        # Edge 1: Sender -> Ligand
-        edge1_key <- paste(sender, ligand, i, sep = "|||")
-        edge1_val <- edge1_values[[edge1_key]]
-
-        sources <- c(sources, node_idx[[paste0("S:", sender)]])
-        targets <- c(targets, node_idx[[paste0("L:", ligand)]])
-        values <- c(values, edge1_val)
-        colors <- c(colors, rgba_color)
-
-        # Edge 2: Ligand -> Receptor
-        edge2_key <- paste(ligand, receptor, i, sep = "|||")
-        edge2_val <- edge2_values[[edge2_key]]
-
-        sources <- c(sources, node_idx[[paste0("L:", ligand)]])
-        targets <- c(targets, node_idx[[paste0("R:", receptor)]])
-        values <- c(values, edge2_val)
-        colors <- c(colors, rgba_color)
-
-        # Edge 3: Receptor -> Receiver
-        total_in <- receptor_total_in[[receptor]]
-        weight_sum <- receptor_weight_norm_sum[[receptor]]
-
-        edge3_val <- if (is.null(total_in) || is.null(weight_sum) || weight_sum == 0) {
-          1e-6  # Minimal edge weight (preserves flow conservation)
-        } else {
-          receptor_expr * total_in / weight_sum
-        }
-        if (edge3_val <= 0) edge3_val <- 1e-6  # Minimal edge weight (preserves flow conservation)
-
-        sources <- c(sources, node_idx[[paste0("R:", receptor)]])
-        targets <- c(targets, node_idx[[paste0("T:", receiver)]])
-        values <- c(values, edge3_val)
-        colors <- c(colors, rgba_color)
-
-        # Track data row for each link (3 links per row)
+        sources <- c(
+          sources,
+          node_idx[[paste0("S:", sender)]],
+          node_idx[[paste0("L:", ligand)]],
+          node_idx[[paste0("R:", receptor)]]
+        )
+        targets <- c(
+          targets,
+          node_idx[[paste0("L:", ligand)]],
+          node_idx[[paste0("R:", receptor)]],
+          node_idx[[paste0("T:", receiver)]]
+        )
+        values <- c(
+          values,
+          edge1_values[[i]],
+          edge2_values[[i]],
+          edge3_values[[i]]
+        )
+        colors <- c(colors, rgba_color, rgba_color, rgba_color)
         row_ids <- c(row_ids, i, i, i)
       }
 
@@ -1840,9 +2051,9 @@ SankeyPlot <- R6::R6Class(
 #'   \itemize{
 #'     \item "auto": Uses weighted flow when required columns are present;
 #'       otherwise uses uniform edge widths without warning.
-#'     \item "weighted"/"flow_conserving": Uses expression-weighted edge widths
-#'       when scaled_activity, scaled_ligand_expression, and scaled_receptor_expression
-#'       columns are present; otherwise uses uniform edge widths.
+#'     \item "weighted"/"flow_conserving": Uses scaled_activity directly for
+#'       sender-to-ligand width and scaled_receptor_expression to redistribute
+#'       downstream flow. Ligand expression does not multiply edge widths.
 #'     \item "uniform": Uses equal edge widths for all communication paths.
 #'   }
 #' @param node_color_mode Node coloring mode (default: "cell_type"):
@@ -1857,6 +2068,9 @@ SankeyPlot <- R6::R6Class(
 #' @param receptor_col Name of the receptor column. Set to NULL to omit
 #'   the receptor layer (3-layer plot: sender -> ligand -> receiver).
 #'   Default: "receptor".
+#' @param activity_unit_col Optional column identifying rows that repeat one
+#'   score-bearing communication unit. Shared rows divide one activity score;
+#'   with `NULL`, rows are independent path-level activity units.
 #' @param ... Additional arguments passed to SankeyPlot$new()
 #'
 #' @return Plotly figure object
@@ -1904,6 +2118,7 @@ sankey_flow <- function(data,
                         node_color_mode = c("cell_type", "weighted_mix"),
                         interactive = FALSE,
                         receptor_col = "receptor",
+                        activity_unit_col = NULL,
                         ...) {
 
   flow_explicit <- !missing(flow_method)
@@ -1911,7 +2126,8 @@ sankey_flow <- function(data,
   node_color_mode <- match.arg(node_color_mode)
 
   args <- list(data = data, cell_colors = cell_colors, width = width,
-               height = height, receptor_col = receptor_col)
+               height = height, receptor_col = receptor_col,
+               activity_unit_col = activity_unit_col)
   if (flow_explicit) args$flow_method <- flow_method
   extra <- list(...)
   if (length(extra) > 0) args <- c(args, extra)

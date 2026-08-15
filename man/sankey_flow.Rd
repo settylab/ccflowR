@@ -18,6 +18,7 @@ sankey_flow(
   node_color_mode = c("cell_type", "weighted_mix"),
   interactive = FALSE,
   receptor_col = "receptor",
+  activity_unit_col = NULL,
   ...
 )
 }
@@ -47,9 +48,9 @@ fixed color for all flows.}
 \itemize{
 \item "auto": Uses weighted flow when required columns are present;
 otherwise uses uniform edge widths without warning.
-\item "weighted"/"flow_conserving": Uses expression-weighted edge widths
-when scaled_activity, scaled_ligand_expression, and scaled_receptor_expression
-columns are present; otherwise uses uniform edge widths.
+\item "weighted"/"flow_conserving": Uses scaled_activity directly for
+sender-to-ligand width and scaled_receptor_expression to redistribute
+downstream flow. Ligand expression does not multiply edge widths.
 \item "uniform": Uses equal edge widths for all communication paths.
 }}
 
@@ -67,6 +68,10 @@ weighted by scaled_receptor_expression. Creates a visual color flow through the 
 \item{receptor_col}{Name of the receptor column. Set to NULL to omit
 the receptor layer (3-layer plot: sender -> ligand -> receiver).
 Default: "receptor".}
+
+\item{activity_unit_col}{Optional column identifying rows that repeat one
+score-bearing communication unit. Shared rows divide one activity score;
+with \code{NULL}, rows are independent path-level activity units.}
 
 \item{...}{Additional arguments passed to SankeyPlot$new()}
 }

@@ -409,9 +409,8 @@ detect_framework <- function(data) {
                              "prioritization_score") %in% cols)
 
   # Check for NicheNet/standard columns
-  # NicheNet requires scaled_activity and scaled_receptor_expression
-
-  # scaled_ligand_expression is optional (defaults to scaled_activity for NicheNet)
+  # NicheNet requires direct activity and a receptor-side redistribution weight.
+  # Ligand expression is optional visualization metadata.
   has_nichenet_full <- all(c("scaled_activity", "scaled_ligand_expression",
                               "scaled_receptor_expression") %in% cols)
   has_nichenet_minimal <- all(c("scaled_activity", "scaled_receptor_expression") %in% cols) &&
@@ -422,7 +421,7 @@ detect_framework <- function(data) {
   } else if (has_nichenet_full) {
     return("nichenet")
   } else if (has_nichenet_minimal) {
-    # NicheNet with minimal columns (scaled_ligand_expression will be derived)
+    # NicheNet with the columns required for weighted flow.
     return("nichenet")
   } else if (has_multinichenet) {
     return("multinichenet_mapped")
@@ -444,6 +443,12 @@ detect_framework <- function(data) {
 #' @param warn Logical. If TRUE, warn about missing or invalid optional weight
 #'   values. Internal auto-mode checks set this to FALSE so plots can quietly
 #'   use uniform edge widths when weights are unavailable. Default: TRUE
+#' @param sender_col,ligand_col,receptor_col,receiver_col Column names for the
+#'   four displayed layers.
+#' @param activity_col Activity-score column used directly for sender-to-ligand
+#'   width.
+#' @param receptor_expr_col Receptor-side weight column used to redistribute
+#'   flow downstream. Ligand expression is not required for edge widths.
 #'
 #' @return Logical. TRUE if data is valid for the requested mode.
 #'   Returns FALSE with a warning if weight columns are missing and `warn = TRUE`.
@@ -453,9 +458,16 @@ detect_framework <- function(data) {
 #' df <- data.frame(sender = "A", receiver = "B", ligand = "L1", receptor = "R1")
 #' validate_sankey_input(df)  # TRUE (base columns present)
 #' validate_sankey_input(df, require_weights = TRUE)  # FALSE (weight cols missing)
-validate_sankey_input <- function(data, require_weights = FALSE, warn = TRUE) {
+validate_sankey_input <- function(data, require_weights = FALSE, warn = TRUE,
+                                  sender_col = "sender",
+                                  ligand_col = "ligand",
+                                  receptor_col = "receptor",
+                                  receiver_col = "receiver",
+                                  activity_col = "scaled_activity",
+                                  receptor_expr_col = "scaled_receptor_expression") {
   # Required columns for all frameworks
-  required_base <- c("sender", "ligand", "receptor", "receiver")
+  required_base <- c(sender_col, ligand_col, receptor_col, receiver_col)
+  required_base <- required_base[!vapply(required_base, is.null, logical(1))]
 
   # Check base columns
   missing_base <- setdiff(required_base, colnames(data))
@@ -469,8 +481,10 @@ validate_sankey_input <- function(data, require_weights = FALSE, warn = TRUE) {
   }
 
   # Check weight columns for weighted flow
-  required_weights <- c("scaled_activity", "scaled_ligand_expression",
-                        "scaled_receptor_expression")
+  required_weights <- c(activity_col, receptor_expr_col)
+  required_weights <- required_weights[
+    !vapply(required_weights, is.null, logical(1))
+  ]
   missing_weights <- setdiff(required_weights, colnames(data))
 
   if (length(missing_weights) > 0) {
@@ -482,12 +496,15 @@ validate_sankey_input <- function(data, require_weights = FALSE, warn = TRUE) {
   }
 
   # Validate numeric ranges
-  if (warn && "scaled_activity" %in% colnames(data)) {
-    if (any(is.na(data$scaled_activity))) {
-      warning("scaled_activity contains NA values, will be treated as 0")
+  if (warn && !is.null(activity_col) && activity_col %in% colnames(data)) {
+    activity <- suppressWarnings(as.numeric(data[[activity_col]]))
+    if (any(!is.finite(activity))) {
+      warning(activity_col, " contains NA values or other non-finite values; ",
+              "they will be treated as 0")
     }
-    if (any(data$scaled_activity < 0, na.rm = TRUE)) {
-      warning("scaled_activity contains negative values")
+    if (any(activity < 0, na.rm = TRUE)) {
+      warning(activity_col, " contains negative values; ",
+              "they will be treated as 0")
     }
   }
 
@@ -534,15 +551,6 @@ prepare_sankey_data <- function(data, auto_map = TRUE) {
       data$scaled_activity <- data$prioritization_score
     }
     ccflow_log("Mapped MultiNicheNet columns to standard names")
-  } else if (auto_map && framework == "nichenet") {
-    # For NicheNet: scaled_ligand_expression defaults to scaled_activity
-    # This reflects that both represent the combined expression + activity score
-    # (see prioritization_criteria_sankey.md documentation)
-    if ("scaled_activity" %in% colnames(data) &&
-        !"scaled_ligand_expression" %in% colnames(data)) {
-      data$scaled_ligand_expression <- data$scaled_activity
-      ccflow_log("NicheNet: Set scaled_ligand_expression = scaled_activity (combined score)")
-    }
   }
 
   # Store framework as attribute

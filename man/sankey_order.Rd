@@ -8,7 +8,9 @@ sankey_order(
   senders = NULL,
   ligands = NULL,
   receptors = NULL,
-  receivers = NULL
+  receivers = NULL,
+  mode = c("constrained", "fixed"),
+  iterations = 8L
 )
 }
 \arguments{
@@ -19,14 +21,23 @@ sankey_order(
 \item{receptors}{Character vector specifying order of receptor nodes.}
 
 \item{receivers}{Character vector specifying order of receiver nodes.}
+
+\item{mode}{Ordering behavior. \code{"constrained"} (default) preserves the
+relative order of named nodes and optimizes all remaining nodes and layers
+to reduce crossings. \code{"fixed"} preserves the historical exact ordering.}
+
+\item{iterations}{Positive integer giving the number of forward/reverse
+optimization sweeps in constrained mode.}
 }
 \value{
 A sankey_layer object
 }
 \description{
-Control the vertical order of nodes within each layer. By default, nodes are
-ordered using an activity-weighted barycenter heuristic to minimize link
-crossings. Use this function to override with a custom order.
+Add relative vertical-order constraints for nodes within each layer. When
+this layer is added, constrained mode is the default: ccflowR preserves the
+named order while using its activity-weighted barycenter heuristic for the
+remaining layout freedom. If this layer is not added, ccflowR continues to
+omit explicit positions and lets Plotly arrange the nodes automatically.
 }
 \examples{
 ex <- example_communication()

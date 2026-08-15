@@ -860,9 +860,9 @@ test_that("uniform and flow_conserving produce different edge values for shared 
   # Both should have the same number of links
   expect_equal(length(uniform_values), length(fc_values))
 
-  # Uniform mode ignores score/expression magnitudes, while flow-conserving
-  # mode uses expression-weighted normalization. The two methods should
-  # produce different link value vectors overall.
+  # Uniform mode ignores score and receptor-side magnitudes, while
+  # flow-conserving mode uses direct activity with downstream redistribution.
+  # The two methods should produce different link value vectors overall.
   expect_false(identical(uniform_values, fc_values),
     info = "Uniform and flow-conserving should produce different link values for shared ligands")
 })

@@ -10,6 +10,7 @@ sankey_plot(
   group_colors = NULL,
   group_col = NULL,
   receptor_col = "receptor",
+  activity_unit_col = NULL,
   flow = c("auto", "weighted", "flow_conserving", "uniform"),
   ...
 )
@@ -22,8 +23,8 @@ sankey_plot(
 \item{ligand}{Character. Ligand gene symbol.}
 \item{receptor}{Character. (Optional) Receptor gene symbol. If absent and
 \code{receptor_col = NULL}, a 3-layer plot (sender -> ligand -> receiver) is created.}
-\item{scaled_activity}{Numeric. (Optional) Activity score used for
-weighted edge widths when the other required weight columns are also present.}
+\item{scaled_activity}{Numeric. Activity score used directly for
+sender-to-ligand width when weighted flow is active.}
 }}
 
 \item{colors}{Named character vector of colors for cell types. Names should match
@@ -40,13 +41,19 @@ Required for group-based coloring.}
 the receptor layer, creating a 3-layer Sankey plot (sender -> ligand -> receiver).
 Default: "receptor".}
 
+\item{activity_unit_col}{Optional column identifying rendering rows that
+repeat one score-bearing activity unit. Shared rows divide that activity
+so it contributes exactly once. With \code{NULL}, every row is an independent
+path-level activity unit.}
+
 \item{flow}{Character. Edge weight computation method:
 \describe{
 \item{"auto"}{(Default) Uses weighted edge widths when the required
 weight columns are present; otherwise uses equal-width edges without warning.}
-\item{"weighted"}{Use expression-weighted edge widths when
-\code{scaled_activity}, \code{scaled_ligand_expression}, and
-\code{scaled_receptor_expression} are present. Equivalent to \code{"flow_conserving"}.}
+\item{"weighted"}{Use \code{scaled_activity} directly for sender-to-ligand
+width and \code{scaled_receptor_expression} to redistribute downstream
+flow. \code{scaled_ligand_expression} is optional metadata and does not
+multiply edge widths. Equivalent to \code{"flow_conserving"}.}
 \item{"flow_conserving"}{Backward-compatible name for weighted flow.}
 \item{"uniform"}{Equal edge widths for all communication paths.}
 }}

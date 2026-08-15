@@ -19,10 +19,11 @@ NULL
 #' @param receptor_col Column name for receptors. Default: \code{"receptor"}
 #' @param activity_col Column name for activity scores. Default: \code{"scaled_activity"}.
 #'   Falls back to \code{"activity"} if not found. Set to \code{NULL} to skip.
-#' @param ligand_expr_col Column name for ligand expression. Default:
-#'   \code{"scaled_ligand_expression"}. Used for weighted edge widths.
-#' @param receptor_expr_col Column name for receptor expression. Default:
-#'   \code{"scaled_receptor_expression"}. Used for weighted edge widths.
+#' @param ligand_expr_col Optional ligand-expression metadata column. Default:
+#'   \code{"scaled_ligand_expression"}. It may be used for weighted node-color
+#'   mixing but does not multiply sender-to-ligand edge widths.
+#' @param receptor_expr_col Column name for the receptor-side weight. Default:
+#'   \code{"scaled_receptor_expression"}. It redistributes flow downstream.
 #' @param sep Column separator. Default: \code{NULL} (auto-detect based on
 #'   file extension: comma for .csv, tab for .tsv/.txt)
 #'
@@ -102,7 +103,8 @@ read_nichenet <- function(file,
 #' @description
 #' Read MultiNicheNet analysis output with group/contrast information.
 #' Automatically maps MultiNicheNet-specific columns (scaled_lfc_ligand, etc.)
-#' to standard names for flow-conserving edge weight computation.
+#' to standard activity and visualization columns. Prioritization scores retain
+#' their path-level meaning for weighted flow.
 #'
 #' @param file Path to CSV/TSV file or a data frame.
 #' @param sender_col Column name for sender cell types. Default: \code{"sender"}
@@ -112,12 +114,13 @@ read_nichenet <- function(file,
 #' @param group_col Column name for groups/conditions. Default: \code{"group"}
 #' @param activity_col Column name for activity/prioritization scores. Default:
 #'   \code{"prioritization_score"} (the standard MultiNicheNet output column).
-#' @param lfc_ligand_col Column name for ligand log fold-change. Default:
-#'   \code{"scaled_lfc_ligand"}. Will be mapped to \code{scaled_ligand_expression}.
+#' @param lfc_ligand_col Column name for ligand log fold-change metadata.
+#'   Default: \code{"scaled_lfc_ligand"}. Will be mapped to
+#'   \code{scaled_ligand_expression} for optional node-color use.
 #' @param lfc_receptor_col Column name for receptor log fold-change. Default:
 #'   \code{"scaled_lfc_receptor"}. Will be mapped to \code{scaled_receptor_expression}.
-#' @param auto_map Logical. If TRUE (default), automatically map MultiNicheNet columns
-#'   to standard flow-conserving column names.
+#' @param auto_map Logical. If TRUE (default), automatically map MultiNicheNet
+#'   columns to standard activity and visualization column names.
 #' @param sep Column separator. Default: \code{NULL} (auto-detect)
 #'
 #' @return Data frame with standardized column names including \code{group} and
@@ -127,7 +130,8 @@ read_nichenet <- function(file,
 #' @details
 #' MultiNicheNet output uses differential expression columns (scaled_lfc_*) rather
 #' than absolute expression. When \code{auto_map = TRUE}, these are mapped to the
-#' standard column names expected by the sankey plot:
+#' standard column names expected by the sankey plot. Ligand expression remains
+#' optional metadata rather than an edge-width multiplier:
 #' \itemize{
 #'   \item \code{scaled_lfc_ligand} -> \code{scaled_ligand_expression}
 #'   \item \code{scaled_lfc_receptor} -> \code{scaled_receptor_expression}

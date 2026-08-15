@@ -41,8 +41,10 @@ A group-colored ccflowR plot should separate two ideas:
 | `ligand` | character | Ligand gene symbol |
 | `receptor` | character | Receptor gene symbol (optional -- omit with `receptor_col = NULL` for 3-layer plots) |
 | `group` | character | Condition label (e.g., "Control", "Treatment") |
+| `prioritization_score` | numeric | Path-specific score that directly sets sender -> ligand width |
+| `scaled_lfc_receptor` | numeric | Receptor-side differential-expression weight used to redistribute downstream flow |
 
-ContextNet's `prepare_for_ccflowr()` produces all required columns including expression weights that enable edge thickness to reflect biological signal strength.
+`read_multinichenet()` maps `prioritization_score` to the activity column used for weighted flow and maps receptor differential expression to the downstream redistribution weight. Ligand differential expression remains optional visualization metadata and does not multiply edge widths.
 
 ### Loading Your Own Data
 
@@ -81,7 +83,7 @@ table(data$group)
 summarize_data(data)
 ```
 
-You should see 27 interactions across 3 conditions with different network densities: Control has 6 core interactions, Treatment has 9 (adding immune-activation pathways like TGFB1 from Fibroblast and IL6 from Macrophage), and Disease has 12 (adding inflammatory pathways like CCL2 and expanded IFNG/IL6 signaling to B_cell). This mirrors real biology where disease conditions activate additional signaling. The data includes `prioritization_score`, `scaled_lfc_ligand`, and `scaled_lfc_receptor` columns, which enable flow-conserving mode with expression-weighted edge thickness.
+The packaged example contains 27 interactions across three simulated conditions with different network densities: Control has 6 core interactions, Treatment has 9, and Disease has 12. The added paths illustrate how a condition-associated network can contain additional inflammatory or immune-activation hypotheses; they are not evidence for a real disease system. Each row carries a path-specific `prioritization_score`, so MultiNicheNet rows remain independent activity units by default. `scaled_lfc_receptor` redistributes flow downstream, whereas `scaled_lfc_ligand` is optional visualization metadata.
 
 ## Step 2: Define Colors
 
@@ -124,12 +126,12 @@ display_sankey(p, widget = TRUE)
 **Reading the plot:**
 - Each flow is colored by its experimental condition
 - Where flows for the same interaction overlap, you can see which conditions share that pathway
-- Flow thickness reflects the prioritization score for each condition — a thicker Treatment flow means that interaction is more active in Treatment
+- Sender -> ligand thickness reflects the path-specific prioritization score for each condition; downstream widths conserve that flow while dividing it by receptor-side weights
 - Ligand-receptor pairs present in all three conditions appear as stacked colored flows at the same position
 
 ## Step 4: Compare Individual Conditions
 
-The combined group-colored plot shows all conditions at once but can become dense. Per-condition plots provide cleaner views for direct side-by-side comparison. Use the same `sankey_order()` across all panels to keep node positions consistent.
+The combined group-colored plot shows all conditions at once but can become dense. Per-condition plots provide cleaner views for direct side-by-side comparison. A complete order supplied through `sankey_order()` remains exact across panels. A partial order preserves only the named relative constraints and allows the remaining nodes to adapt to each condition's topology.
 
 ```{r contextnet_multinichenet_6, message=TRUE, warning=TRUE}
 # Filter to Control only
@@ -161,7 +163,7 @@ ccflowR customizations work the same way with multi-condition data. See the **Pa
 
 **New features:**
 - `sankey_colors(by = "steelblue")` -- use any color string for monochrome flows
-- `sankey_nodes(arrangement = "snap")` -- enable interactive node dragging
+- `sankey_nodes(arrangement = "snap")` -- allow Plotly to snap or drag nodes when explicit custom positions are not required
 - `sankey_plot(..., receptor_col = NULL)` -- omit receptor layer for 3-layer diagrams
 
 ```{r contextnet_multinichenet_8, message=TRUE, warning=TRUE}
@@ -177,7 +179,7 @@ display_sankey(p)
 
 ### Custom Node Ordering
 
-By default, nodes are ordered using a barycenter heuristic that minimizes link crossings. Keep node positions consistent across all panels for direct visual comparison by specifying a custom order.
+Without `sankey_order()`, Plotly controls node placement. After a custom sequence is supplied, ccflowR preserves the relative order of the named nodes and deterministically optimizes the remaining layout freedom to reduce activity-weighted crossings. Supply complete layer orders when exact cross-panel positions are required. Use `mode = "fixed"` only for the historical exact-leading-order behavior.
 
 ```{r contextnet_multinichenet_9, message=TRUE, warning=TRUE}
 p <- sankey_plot(data, celltype_colors, group_col = "group") +
@@ -280,7 +282,7 @@ cat("PNG export check:", if (png_ok) "ok" else "skipped", "\n")
 | "group column not found" | Ensure your data has a `group` column, or specify the correct name with `group_col` |
 | Colors don't match conditions | Check that `sankey_group_colors()` names match unique values in the group column |
 | Too many flows | Use `filter_top_pathways(data, n = 10, per_group = TRUE)` to reduce density |
-| Nodes in wrong order | Default uses barycenter ordering. Use `sankey_order()` to set explicit positions |
+| Named nodes appear with unlisted nodes between them | Constrained mode preserves relative order while optimizing the remaining nodes. Supply a complete order, or use `mode = "fixed"` for historical exact-leading positions |
 | Want receptor-free view | Use `sankey_plot(..., receptor_col = NULL)` for a 3-layer Sender -> Ligand -> Receiver diagram |
 
 ## Next Steps

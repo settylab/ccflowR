@@ -80,12 +80,15 @@ The provided `environment.yml` installs Python `plotly` and `kaleido<1.0`. If st
 | `ligand` | yes | Ligand gene or ligand complex | second plot layer |
 | `receptor` | yes for 4-layer plots | Receptor gene or receptor complex | third plot layer |
 | `receiver` | yes | Cell type or cell state receiving the signal | final plot layer and receiver coloring |
-| `scaled_activity` | optional | Ligand/path activity or prioritization score | weighted edge widths |
-| `scaled_ligand_expression` | optional | Sender-side ligand expression or differential expression | sender -> ligand edge weights |
-| `scaled_receptor_expression` | optional | Receiver-side receptor expression or differential expression | receptor -> receiver edge weights |
+| `scaled_activity` | required for weighted flow | Activity or prioritization score for one communication unit | direct sender -> ligand width |
+| activity-unit identifier | optional | Identifier shared by receptor-expanded rows that repeat one score | prevents one activity score from being counted more than once when passed through `activity_unit_col` |
+| `scaled_ligand_expression` | optional | Raw sender-side ligand expression or differential expression | hover metadata or weighted ligand-node color mixing; never edge width |
+| `scaled_receptor_expression` | required for weighted flow | Receiver-side receptor expression or differential expression | redistribution of ligand and receptor inflow across downstream branches |
 | `group` | optional | Condition, sample group, contrast, or time point | multi-condition coloring |
 
-By default, `flow = "auto"` uses weighted edge widths when `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression` are all present. If any required weight column is absent, `ccflowR` draws equal-width paths without warning so the plot still shows topology. Use `flow = "weighted"` or `flow = "flow_conserving"` to request weighted widths explicitly, and use `flow = "uniform"` when the plot should show topology only.
+By default, `flow = "auto"` uses weighted flow when `scaled_activity` and `scaled_receptor_expression` are present. Each score-bearing communication unit contributes its activity directly to the sender -> ligand layer; there is no within-sender expression share or denominator over other displayed ligands. Receptor-side weights redistribute that inflow downstream so total inflow equals total outflow at each ligand and receptor. If either required weight column is absent, `ccflowR` quietly draws equal-width paths. Use `flow = "uniform"` when the plot should show topology only.
+
+Ligand expression is optional visualization metadata. `ccflowR` does not globally min-max normalize it and does not use it to rescale edge widths. A raw normal-CDF expression score or differential-expression value can therefore remain in `scaled_ligand_expression` for annotation or node-color mixing without changing flow geometry.
 
 For ligand-only displays, set `receptor_col = NULL`; the plot becomes:
 
@@ -101,7 +104,26 @@ ContextNet can write a `sankey_river.csv`-style table after ligand prioritizatio
 data <- read_nichenet("path/to/sankey_river.csv")
 ```
 
-ContextNet-derived tables should include `sender`, `receiver`, `ligand`, `receptor`, and score/expression columns such as `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`.
+ContextNet-derived tables should include `sender`, `receiver`, `ligand`, `receptor`, `scaled_activity`, and `scaled_receptor_expression`. `scaled_ligand_expression` is optional metadata.
+
+Single-condition ContextNet tables can repeat one sender-ligand-receiver score after expansion across several receptors. Mark those rows with a shared unit identifier so the activity contributes once:
+
+```r
+data$activity_unit <- interaction(
+  data$sender,
+  data$ligand,
+  data$receiver,
+  drop = TRUE
+)
+
+p <- sankey_plot(
+  data,
+  activity_unit_col = "activity_unit",
+  flow = "weighted"
+)
+```
+
+Rows without an activity-unit identifier remain independent path-level scores. This default preserves MultiNicheNet prioritization scores that are defined for complete sender-ligand-receptor-receiver-condition paths.
 
 ### MultiNicheNet Input
 
@@ -134,6 +156,23 @@ p <- sankey_plot(data, celltype_colors) +
   sankey_title("Macrophage signaling paths")
 
 p
+```
+
+## Constrained Node Order
+
+Without `sankey_order()`, node coordinates remain unset and Plotly uses its automatic `snap` layout. After a custom order is supplied, ccflowR treats the named sequence as a relative constraint and deterministically optimizes the remaining node positions to reduce activity-weighted crossings:
+
+```r
+p + sankey_order(ligands = c("TGFB1", "IL6", "TNF"))
+```
+
+Unlisted nodes may appear before, between, or after the named ligands, but the named ligands retain their relative order. A complete supplied order remains exact. Use `mode = "fixed"` only when reproducing the historical behavior in which named nodes occupy the exact leading positions:
+
+```r
+p + sankey_order(
+  ligands = c("TGFB1", "IL6", "TNF"),
+  mode = "fixed"
+)
 ```
 
 In Jupyter notebooks, use the package-native display helper so saved notebooks include the interactive htmlwidget and, when available, a static PNG preview:
@@ -174,7 +213,7 @@ See [`notebooks/README.md`](notebooks/README.md) for tutorial-running notes and 
 | Symptom | Likely Cause | What To Try |
 |---------|--------------|-------------|
 | `Missing required columns` | Input table does not use ccflowR column names | Use `read_nichenet()`, `read_multinichenet()`, or pass custom column names to a reader |
-| All flows have equal width | Auto mode did not find all weight columns, or uniform mode was requested | Add `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`, or use `flow = "uniform"` intentionally |
+| All flows have equal width | Auto mode did not find the activity and receptor-weight columns, or uniform mode was requested | Add `scaled_activity` and `scaled_receptor_expression`, or use `flow = "uniform"` intentionally |
 | Static PNG export fails | Kaleido, Python plotly, Chrome, or webshot2 is unavailable | Use the micromamba environment, install `kaleido<1.0` plus Python `plotly`, or configure `webshot2` with Chrome |
 | Jupyter shows no plot | Kernel is not the ccflowR R environment or widget output is hidden | Select `ccflowR R` and use `sankey_display_notebook()` |
 | `RETICULATE_PYTHON` points to a missing Python | R is trying to use a stale Python path | Unset `RETICULATE_PYTHON` or point it to the micromamba environment Python |

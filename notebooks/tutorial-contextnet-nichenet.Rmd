@@ -44,14 +44,27 @@ The plot helps inspect model-supported communication hypotheses. It should be in
 | `receiver` | character | Receiving cell type name |
 | `ligand` | character | Ligand gene symbol |
 | `receptor` | character | Receptor gene symbol (optional -- omit with `receptor_col = NULL` for 3-layer plots) |
+| `scaled_activity` | numeric | Activity score that directly sets sender -> ligand width in weighted flow |
+| `scaled_receptor_expression` | numeric | Receptor-side weight used to redistribute flow downstream |
 
-ContextNet's `prepare_for_ccflowr()` produces all required columns including expression weights (`scaled_activity`, `scaled_ligand_expression`, `scaled_receptor_expression`) that enable edge thickness to reflect biological signal strength.
+ContextNet's `prepare_for_ccflowr()` produces the activity and receptor-side weights needed for weighted flow. Ligand expression can remain as optional annotation or node-color metadata, but ccflowR neither globally min-max scales it nor uses it to multiply edge widths.
 
 ### Loading Your Own Data
 
     # Load your NicheNet/ContextNet output file
     data <- read_nichenet("path/to/your/sankey_river.csv")
     head(data)
+
+If a single-condition ContextNet score is repeated after expansion across several receptors, define one identifier for the shared sender-ligand-receiver activity unit and pass that column to `sankey_plot()`. The repeated rendering rows then divide one score rather than multiplying it:
+
+    data$activity_unit <- interaction(
+      data$sender, data$ligand, data$receiver, drop = TRUE
+    )
+    p <- sankey_plot(
+      data,
+      activity_unit_col = "activity_unit",
+      flow = "weighted"
+    )
 
 ```{r contextnet_nichenet_1, message=TRUE, warning=TRUE}
 library(ccflowR)
@@ -113,7 +126,7 @@ if (length(missing) > 0) {
 **Why start with a basic plot?** Before customizing, verify that your data loaded correctly and get an overview of the communication network. The default plot shows all interactions with sensible defaults.
 
 ```{r contextnet_nichenet_5, message=TRUE, warning=TRUE}
-# Basic plot — edge thickness reflects expression levels, colored by sender
+# Basic plot — sender flow reflects direct activity scores, colored by sender
 p <- sankey_plot(data, celltype_colors)
 display_sankey(p, widget = TRUE)
 ```
@@ -124,7 +137,7 @@ The plot displays four layers from left to right:
 3. **Receptor** (center-right) - Receptor molecules
 4. **Receiver** (right) - Cell types receiving signals
 
-Edge thickness reflects expression levels — thicker edges represent stronger interactions. Nodes are automatically ordered to minimize link crossings.
+Sender -> ligand thickness reflects the activity score represented by each communication unit. Receptor-side weights divide that flow across downstream branches while conserving total ligand and receptor inflow. Without a custom order, Plotly automatically arranges the nodes.
 
 > **Tip:** Set `receptor_col = NULL` in `sankey_plot()` to create a simpler 3-layer diagram (Sender -> Ligand -> Receiver) when receptor information is not needed.
 
@@ -146,7 +159,7 @@ display_sankey(p)
 
 ### Uniform Mode (Optional)
 
-By default, `flow = "auto"` uses weighted edge widths when the table includes `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`. If those columns are absent, the plot uses equal-width paths. Use uniform mode when the figure should show topology only.
+By default, `flow = "auto"` uses weighted edges when the table includes `scaled_activity` and `scaled_receptor_expression`. `scaled_ligand_expression` does not affect edge width. If either required weight column is absent, the plot uses equal-width paths. Uniform mode intentionally shows topology without score magnitudes.
 
 ```{r contextnet_nichenet_7, message=TRUE, warning=TRUE}
 # Show network topology only (all edges equal thickness)
@@ -169,7 +182,7 @@ display_sankey(p)
 
 ### Custom Node Ordering
 
-By default, nodes are ordered using a barycenter heuristic that minimizes link crossings. Use `sankey_order()` to override with a custom arrangement based on biological narrative (e.g., differentiation stage, immune cell hierarchy).
+Without `sankey_order()`, Plotly controls node placement. When a custom sequence is supplied, ccflowR preserves the relative order of the named nodes and uses deterministic activity-weighted barycenter sweeps to reduce crossings with the remaining layout freedom. Unlisted nodes may be interleaved. Use `mode = "fixed"` only to reproduce the historical exact-leading-order layout.
 
 ```{r contextnet_nichenet_9, message=TRUE, warning=TRUE}
 p <- sankey_plot(data, celltype_colors) +
@@ -256,7 +269,7 @@ cat("PNG export check:", if (png_ok) "ok" else "skipped", "\n")
 | Issue | Solution |
 |-------|----------|
 | "Missing required columns" | Check column names: `sender`, `receiver`, `ligand`, `receptor` |
-| Equal-width flows in auto mode | Add `scaled_activity`, `scaled_ligand_expression`, and `scaled_receptor_expression`; or use `flow = "uniform"` intentionally |
+| Equal-width flows in auto mode | Add `scaled_activity` and `scaled_receptor_expression`; or use `flow = "uniform"` intentionally |
 | Plot not displaying | Select the `ccflowR R` kernel and use `sankey_display_notebook()` in Jupyter |
 | Colors not applied | Ensure color vector names match cell type names exactly (case-sensitive) |
 | Static export fails | Use the micromamba environment, install Python `plotly` plus `kaleido<1.0`, or configure `webshot2` with Chrome/Chromium |

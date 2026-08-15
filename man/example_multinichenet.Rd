@@ -18,7 +18,8 @@ scaled_lfc_ligand, and scaled_lfc_receptor columns
 \description{
 Generate example data with group/condition information, similar to
 MultiNicheNet output format. Includes prioritization scores and
-differential expression columns for flow-conserving mode.
+path-level prioritization scores and differential expression columns for
+flow-conserving mode and optional node-color metadata.
 
 Features condition-specific interactions to demonstrate multi-condition
 comparison: Control has 6 core interactions, Treatment adds 3 immune-

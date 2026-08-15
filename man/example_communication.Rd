@@ -16,7 +16,8 @@ scaled_activity, and scaled_receptor_expression columns
 }
 \description{
 Generate an example dataset for demonstrations. Contains 5 cell types
-and 15 interactions with expression columns for flow-conserving mode.
+and 15 interactions with activity and receptor-side weights for
+flow-conserving mode.
 Includes shared ligands (TGFB1, TNF, IL6) and shared receptors to
 create convergence/divergence patterns in the Sankey diagram, and a
 wide weight range to clearly show flow-conserving vs uniform modes.

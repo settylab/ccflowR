@@ -31,11 +31,12 @@ provided, it is returned as-is after column renaming.}
 \item{activity_col}{Column name for activity scores. Default: \code{"scaled_activity"}.
 Falls back to \code{"activity"} if not found. Set to \code{NULL} to skip.}
 
-\item{ligand_expr_col}{Column name for ligand expression. Default:
-\code{"scaled_ligand_expression"}. Used for weighted edge widths.}
+\item{ligand_expr_col}{Optional ligand-expression metadata column. Default:
+\code{"scaled_ligand_expression"}. It may be used for weighted node-color
+mixing but does not multiply sender-to-ligand edge widths.}
 
-\item{receptor_expr_col}{Column name for receptor expression. Default:
-\code{"scaled_receptor_expression"}. Used for weighted edge widths.}
+\item{receptor_expr_col}{Column name for the receptor-side weight. Default:
+\code{"scaled_receptor_expression"}. It redistributes flow downstream.}
 
 \item{sep}{Column separator. Default: \code{NULL} (auto-detect based on
 file extension: comma for .csv, tab for .tsv/.txt)}

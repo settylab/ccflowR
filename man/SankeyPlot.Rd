@@ -40,7 +40,7 @@ plot$label_style(size = 14)  # Only size has effect
 ## ------------------------------------------------
 
 plot$flow_method("uniform")  # Draw equal-width paths
-plot$flow_method("weighted")  # Use expression-weighted flow when available
+plot$flow_method("weighted")  # Use direct activity and receptor-side weights
 
 ## ------------------------------------------------
 ## Method `SankeyPlot$node_colors`
@@ -109,6 +109,7 @@ Initialize Sankey plot
   receiver_col = "receiver",
   group_col = NULL,
   activity_col = NULL,
+  activity_unit_col = NULL,
   ligand_expr_col = "scaled_ligand_expression",
   receptor_expr_col = "scaled_receptor_expression",
   flow_method = c("auto", "weighted", "flow_conserving", "uniform"),
@@ -138,17 +139,26 @@ Initialize Sankey plot
 \item{\code{group_col}}{Name of group column (optional)}
 
 \item{\code{activity_col}}{Name of activity/weight column (optional). Weighted
-flow uses "scaled_activity" when present.}
+flow uses this score directly for sender-to-ligand width and defaults
+to "scaled_activity" when present.}
 
-\item{\code{ligand_expr_col}}{Name of ligand expression column for weighted flow.
-Default: "scaled_ligand_expression"}
+\item{\code{activity_unit_col}}{Optional column identifying rows that repeat one
+score-bearing communication unit. Repeated rows sharing an identifier
+divide that unit's activity so it contributes exactly once. With
+\code{NULL} (default), every row is an independent path-level activity unit.}
 
-\item{\code{receptor_expr_col}}{Name of receptor expression column for weighted flow.
-Default: "scaled_receptor_expression"}
+\item{\code{ligand_expr_col}}{Optional ligand expression column used for weighted
+ligand-node color mixing, not edge widths. Default:
+"scaled_ligand_expression".}
+
+\item{\code{receptor_expr_col}}{Name of the receptor-side weight column used to
+redistribute ligand and receptor inflow downstream. Default:
+"scaled_receptor_expression".}
 
 \item{\code{flow_method}}{Edge weight computation method. "auto" (default) uses
 weighted flow when required weight columns are present and uniform flow otherwise.
-"weighted" and "flow_conserving" use expression-weighted edge thickness.
+"weighted" and "flow_conserving" use direct activity-based sender flow
+with receptor-weighted downstream redistribution.
 "uniform" draws all communication paths with equal edge weights.}
 
 \item{\code{auto_prepare}}{Logical. If TRUE, automatically detect framework and map
@@ -264,8 +274,8 @@ Configure node appearance
 
 \item{\code{padding}}{Padding between nodes}
 
-\item{\code{arrangement}}{Plotly arrangement mode: "fixed" (default, preserves node
-order), or "snap" (allows interactive dragging).}
+\item{\code{arrangement}}{Plotly arrangement mode. The default is "snap" when
+no custom order is supplied; custom ordering uses fixed coordinates.}
 }
 \if{html}{\out{</div>}}
 }
@@ -283,7 +293,9 @@ Set custom node ordering
   senders = NULL,
   ligands = NULL,
   receptors = NULL,
-  receivers = NULL
+  receivers = NULL,
+  mode = c("constrained", "fixed"),
+  iterations = 8L
 )}\if{html}{\out{</div>}}
 }
 
@@ -297,6 +309,15 @@ Set custom node ordering
 \item{\code{receptors}}{Order of receptor nodes}
 
 \item{\code{receivers}}{Order of receiver nodes}
+
+\item{\code{mode}}{Ordering mode. \code{"constrained"} (default) treats supplied
+vectors as relative order constraints and optimizes all remaining
+freedom with repeated activity-weighted barycenter sweeps. \code{"fixed"}
+preserves the historical behavior: each supplied vector is placed
+exactly at the top of its layer, followed by unlisted nodes.}
+
+\item{\code{iterations}}{Number of forward/reverse sweeps used in constrained
+mode.}
 }
 \if{html}{\out{</div>}}
 }
@@ -468,9 +489,9 @@ Configure edge weight computation method
 \itemize{
 \item "auto": Uses weighted flow when required columns are present;
 otherwise uses uniform edge widths without warning.
-\item "weighted"/"flow_conserving": Uses expression-weighted edge widths
-when scaled_activity, scaled_ligand_expression, and
-scaled_receptor_expression are present; otherwise uses uniform widths.
+\item "weighted"/"flow_conserving": Uses scaled_activity directly for
+sender-to-ligand width and scaled_receptor_expression to redistribute
+flow downstream. Ligand expression is not an edge-width multiplier.
 \item "uniform": Uses equal edge widths for all communication paths.
 }}
 }
@@ -482,7 +503,7 @@ Self (invisibly) for chaining
 \subsection{Examples}{
 \if{html}{\out{<div class="r example copy">}}
 \preformatted{plot$flow_method("uniform")  # Draw equal-width paths
-plot$flow_method("weighted")  # Use expression-weighted flow when available
+plot$flow_method("weighted")  # Use direct activity and receptor-side weights
 }
 \if{html}{\out{</div>}}
 
