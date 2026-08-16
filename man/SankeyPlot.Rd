@@ -264,7 +264,13 @@ Self (invisibly) for chaining
 \subsection{Method \code{nodes()}}{
 Configure node appearance
 \subsection{Usage}{
-\if{html}{\out{<div class="r">}}\preformatted{SankeyPlot$nodes(thickness = NULL, padding = NULL, arrangement = NULL)}\if{html}{\out{</div>}}
+\if{html}{\out{<div class="r">}}\preformatted{SankeyPlot$nodes(
+  thickness = NULL,
+  padding = NULL,
+  arrangement = NULL,
+  vertical_span = 0.7,
+  minimum_gap = 4
+)}\if{html}{\out{</div>}}
 }
 
 \subsection{Arguments}{
@@ -276,6 +282,18 @@ Configure node appearance
 
 \item{\code{arrangement}}{Plotly arrangement mode. The default is "snap" when
 no custom order is supplied; custom ordering uses fixed coordinates.}
+
+\item{\code{vertical_span}}{Requested fraction of the full rendered sender and
+receiver spans to retain after constrained ordering. Supply one value
+for both outer layers or a named vector with \code{senders} and/or
+\code{receivers}; an unnamed layer retains its current span. Values must be
+in \verb{(0, 1]}. The default is 0.7; set to 1 to retain the original
+full-span coordinates. A requested span is increased when needed to
+prevent node or label overlap. Ligand and receptor coordinates are
+never changed.}
+
+\item{\code{minimum_gap}}{Minimum readable separation in pixels between adjacent
+outer-layer node or label boxes after packing. Default: 4.}
 }
 \if{html}{\out{</div>}}
 }

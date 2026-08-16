@@ -488,6 +488,15 @@ sankey_unhighlight <- function() {
 #' @param arrangement Plotly arrangement mode. The underlying default is
 #'   "snap" when no custom order is supplied. Adding `sankey_order()` switches
 #'   to fixed coordinates so the constrained order is reproducible.
+#' @param vertical_span Requested fraction of the full rendered sender and
+#'   receiver spans to retain after constrained ordering. Supply one value for
+#'   both outer layers or a named vector with `senders` and/or `receivers`;
+#'   an unnamed layer retains its current span. Values must be in `(0, 1]`.
+#'   The default is 0.7. Set to 1 to retain the original full-span coordinates.
+#'   A requested span is increased when needed to prevent node or label overlap.
+#'   Ligand and receptor coordinates are never changed.
+#' @param minimum_gap Minimum readable separation in pixels between adjacent
+#'   outer-layer node or label boxes after packing. Default: 4.
 #'
 #' @return A sankey_layer object
 #' @export
@@ -503,13 +512,21 @@ sankey_unhighlight <- function() {
 #'
 #' # Enable interactive node dragging
 #' sankey_plot(ex$data, ex$colors) + sankey_nodes(arrangement = "snap")
-sankey_nodes <- function(thickness = NULL, padding = NULL, arrangement = NULL) {
+#'
+#' # Pack sender and receiver stacks without changing their order
+#' sankey_plot(ex$data, ex$colors) +
+#'   sankey_order(ligands = c("TGFB1", "IL6")) +
+#'   sankey_nodes(vertical_span = c(senders = 0.85, receivers = 0.7))
+sankey_nodes <- function(thickness = NULL, padding = NULL, arrangement = NULL,
+                         vertical_span = 0.7, minimum_gap = 4) {
   structure(
     list(
       type = "nodes",
       thickness = thickness,
       padding = padding,
-      arrangement = arrangement
+      arrangement = arrangement,
+      vertical_span = vertical_span,
+      minimum_gap = minimum_gap
     ),
     class = "sankey_layer"
   )
@@ -920,7 +937,9 @@ apply_layer <- function(plot, layer) {
     },
     nodes = {
       internal$nodes(thickness = layer$thickness, padding = layer$padding,
-                     arrangement = layer$arrangement)
+                     arrangement = layer$arrangement,
+                     vertical_span = layer$vertical_span %||% 0.7,
+                     minimum_gap = layer$minimum_gap %||% 4)
     },
     order = {
       internal$node_order(
