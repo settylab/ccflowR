@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Collision-aware outer-layer packing**: Ordered Sankey layouts now center
+  sender and receiver stacks at a default `vertical_span = 0.7`. Users can
+  tune both outer layers together or set named `senders` and `receivers`
+  spans through `sankey_nodes()`; `vertical_span = 1` restores the original
+  full-span coordinates. Packing preserves node order, ligand/receptor
+  coordinates, and all link values, widths, and colors.
 - **Constrained custom ordering**: `sankey_order()` and `SankeyPlot$node_order()` now treat supplied node sequences as relative constraints by default and optimize the remaining layout freedom with deterministic activity-weighted barycenter sweeps. `mode = "fixed"` preserves the historical exact-leading-order behavior. Plots without a custom order still leave coordinates unset for Plotly's automatic `snap` layout.
 - **Explicit activity-unit scope**: `activity_unit_col` identifies receptor-expanded rows that repeat one score-bearing communication unit. Shared rows divide that score so it contributes exactly once; rows without an identifier remain independent path-level activities.
 - **Public notebook/Rmd tutorial layout**: README and `notebooks/README.md` now follow the ContextNet public tutorial pattern, explain the ccflowR input schema, and point RStudio users to Rmd companions in `notebooks/` rather than package vignettes.

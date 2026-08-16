@@ -4,7 +4,13 @@
 \alias{sankey_nodes}
 \title{Configure Node Appearance}
 \usage{
-sankey_nodes(thickness = NULL, padding = NULL, arrangement = NULL)
+sankey_nodes(
+  thickness = NULL,
+  padding = NULL,
+  arrangement = NULL,
+  vertical_span = 0.7,
+  minimum_gap = 4
+)
 }
 \arguments{
 \item{thickness}{Node thickness in pixels. Default: 20. Range: 5-50.
@@ -16,6 +22,17 @@ More padding spreads nodes apart; less padding creates a denser layout.}
 \item{arrangement}{Plotly arrangement mode. The underlying default is
 "snap" when no custom order is supplied. Adding \code{sankey_order()} switches
 to fixed coordinates so the constrained order is reproducible.}
+
+\item{vertical_span}{Requested fraction of the full rendered sender and
+receiver spans to retain after constrained ordering. Supply one value for
+both outer layers or a named vector with \code{senders} and/or \code{receivers};
+an unnamed layer retains its current span. Values must be in \verb{(0, 1]}.
+The default is 0.7. Set to 1 to retain the original full-span coordinates.
+A requested span is increased when needed to prevent node or label overlap.
+Ligand and receptor coordinates are never changed.}
+
+\item{minimum_gap}{Minimum readable separation in pixels between adjacent
+outer-layer node or label boxes after packing. Default: 4.}
 }
 \value{
 A sankey_layer object
@@ -34,4 +51,9 @@ sankey_plot(ex$data, ex$colors) + sankey_nodes(thickness = 12, padding = 15)
 
 # Enable interactive node dragging
 sankey_plot(ex$data, ex$colors) + sankey_nodes(arrangement = "snap")
+
+# Pack sender and receiver stacks without changing their order
+sankey_plot(ex$data, ex$colors) +
+  sankey_order(ligands = c("TGFB1", "IL6")) +
+  sankey_nodes(vertical_span = c(senders = 0.85, receivers = 0.7))
 }

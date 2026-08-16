@@ -176,6 +176,8 @@ SankeyPlot <- R6::R6Class(
       private$.alpha <- 0.65
       private$.node_thickness <- 25
       private$.node_padding <- 40
+      private$.outer_vertical_span <- c(senders = 0.7, receivers = 0.7)
+      private$.outer_minimum_gap <- 4
       private$.orientation <- "h"  # horizontal
       private$.arrangement <- "snap"
       private$.node_order <- NULL
@@ -260,14 +262,35 @@ SankeyPlot <- R6::R6Class(
     #' @param padding Padding between nodes
     #' @param arrangement Plotly arrangement mode. The default is "snap" when
     #'   no custom order is supplied; custom ordering uses fixed coordinates.
+    #' @param vertical_span Requested fraction of the full rendered sender and
+    #'   receiver spans to retain after constrained ordering. Supply one value
+    #'   for both outer layers or a named vector with `senders` and/or
+    #'   `receivers`; an unnamed layer retains its current span. Values must be
+    #'   in `(0, 1]`. The default is 0.7; set to 1 to retain the original
+    #'   full-span coordinates. A requested span is increased when needed to
+    #'   prevent node or label overlap. Ligand and receptor coordinates are
+    #'   never changed.
+    #' @param minimum_gap Minimum readable separation in pixels between adjacent
+    #'   outer-layer node or label boxes after packing. Default: 4.
     #' @return Self (invisibly) for chaining
-    nodes = function(thickness = NULL, padding = NULL, arrangement = NULL) {
+    nodes = function(thickness = NULL, padding = NULL, arrangement = NULL,
+                     vertical_span = 0.7, minimum_gap = 4) {
       if (!is.null(thickness)) private$.node_thickness <- thickness
       if (!is.null(padding)) private$.node_padding <- padding
       if (!is.null(arrangement)) {
         arrangement <- match.arg(arrangement, c("fixed", "snap", "freeform", "perpendicular"))
         private$.arrangement <- arrangement
       }
+      if (!is.null(vertical_span)) {
+        private$.outer_vertical_span <- private$.validate_vertical_span(
+          vertical_span
+        )
+      }
+      if (length(minimum_gap) != 1L || !is.finite(minimum_gap) ||
+          minimum_gap < 0) {
+        stop("minimum_gap must be one nonnegative finite number", call. = FALSE)
+      }
+      private$.outer_minimum_gap <- as.numeric(minimum_gap)
       invisible(self)
     },
 
@@ -604,6 +627,8 @@ SankeyPlot <- R6::R6Class(
     .alpha = NULL,
     .node_thickness = NULL,
     .node_padding = NULL,
+    .outer_vertical_span = NULL,
+    .outer_minimum_gap = NULL,
     .arrangement = NULL,
     .orientation = NULL,
     .node_order = NULL,
@@ -616,6 +641,48 @@ SankeyPlot <- R6::R6Class(
     .label_font_size = NULL,
     .label_position = NULL,
     .interactive_filter = NULL,
+
+    # Normalize the public outer-layer span control to a named two-element
+    # vector. A scalar applies symmetrically; a named subset updates only the
+    # requested outer layer and retains the other layer's current span.
+    .validate_vertical_span = function(vertical_span) {
+      if (!is.numeric(vertical_span) || length(vertical_span) < 1L ||
+          length(vertical_span) > 2L || any(!is.finite(vertical_span)) ||
+          any(vertical_span <= 0 | vertical_span > 1)) {
+        stop(
+          "vertical_span must contain one or two finite values in (0, 1]",
+          call. = FALSE
+        )
+      }
+
+      if (is.null(names(vertical_span))) {
+        if (length(vertical_span) != 1L) {
+          stop(
+            "An unnamed vertical_span must contain exactly one value",
+            call. = FALSE
+          )
+        }
+        return(c(
+          senders = as.numeric(vertical_span),
+          receivers = as.numeric(vertical_span)
+        ))
+      }
+
+      if (any(!nzchar(names(vertical_span))) ||
+          anyDuplicated(names(vertical_span)) ||
+          any(!names(vertical_span) %in% c("senders", "receivers"))) {
+        stop(
+          "Named vertical_span values must use unique 'senders' and/or 'receivers' names",
+          call. = FALSE
+        )
+      }
+      result <- private$.outer_vertical_span
+      if (is.null(result)) {
+        result <- c(senders = 0.7, receivers = 0.7)
+      }
+      result[names(vertical_span)] <- as.numeric(vertical_span)
+      result
+    },
 
     # Return the nonnegative activity contribution represented by each row.
     # By default every row is an independent path-level unit. When an explicit
@@ -795,8 +862,10 @@ SankeyPlot <- R6::R6Class(
             rep(0.999, length(receivers))
           )
           layer_nodes_list <- list(
-            paste0("S:", senders), paste0("L:", ligands),
-            paste0("R:", receptors), paste0("T:", receivers)
+            senders = paste0("S:", senders),
+            ligands = paste0("L:", ligands),
+            receptors = paste0("R:", receptors),
+            receivers = paste0("T:", receivers)
           )
         } else {
           node_x <- c(
@@ -805,8 +874,9 @@ SankeyPlot <- R6::R6Class(
             rep(0.999, length(receivers))
           )
           layer_nodes_list <- list(
-            paste0("S:", senders), paste0("L:", ligands),
-            paste0("T:", receivers)
+            senders = paste0("S:", senders),
+            ligands = paste0("L:", ligands),
+            receivers = paste0("T:", receivers)
           )
         }
 
@@ -1155,67 +1225,164 @@ SankeyPlot <- R6::R6Class(
       sum(vapply(layer_pairs, pair_score, numeric(1)))
     },
 
-    # Calculate flow-proportional Y positions for each layer.
-    # Allocates vertical space proportional to total flow through each node,
-    # preventing overlap and producing a layout that respects node order.
+    # Estimate the node heights Plotly will render before applying explicit
+    # coordinates. Plotly's bundled d3-sankey implementation caps node padding
+    # at two-thirds of the available height divided by the largest layer's gap
+    # count, then uses one global value-to-pixel scale across all layers.
+    .estimate_rendered_heights = function(layer_info, drawable_height) {
+      layer_counts <- vapply(layer_info, function(info) info$n, integer(1))
+      max_count <- max(layer_counts, 0L)
+      effective_pad <- private$.node_padding
+      if (max_count > 1L) {
+        effective_pad <- min(
+          effective_pad,
+          (2 / 3) * drawable_height / (max_count - 1L)
+        )
+      }
+
+      scale_candidates <- vapply(layer_info, function(info) {
+        total_flow <- sum(info$render_flows)
+        if (info$n == 0L || !is.finite(total_flow) || total_flow <= 0) {
+          return(Inf)
+        }
+        available <- drawable_height - (info$n - 1L) * effective_pad
+        max(0, available) / total_flow
+      }, numeric(1))
+      value_scale <- min(scale_candidates)
+      if (!is.finite(value_scale)) value_scale <- 0
+
+      lapply(layer_info, function(info) info$render_flows * value_scale)
+    },
+
+    # Reduce only the free space between already ordered nodes. Required gaps
+    # account for both rendered node heights and single-line Plotly labels, so
+    # compaction cannot introduce a node or label collision. No sorting occurs.
+    .pack_layer_centers = function(centers, heights_px, requested_span,
+                                   drawable_height) {
+      n <- length(centers)
+      if (n <= 1L) return(rep(0.5, n))
+      if (requested_span >= 1) return(centers)
+
+      center_px <- centers * drawable_height
+      top_px <- center_px - heights_px / 2
+      bottom_px <- center_px + heights_px / 2
+      baseline_gaps <- top_px[-1L] - bottom_px[-n]
+      baseline_span <- max(bottom_px) - min(top_px)
+
+      # Arial/Helvetica's rendered line box is approximately 1.12 em. Use 1.2
+      # em here to remain conservative across font substitutions.
+      label_height <- 1.2 * private$.label_font_size
+      minimum_gap <- private$.outer_minimum_gap
+      required_gaps <- pmax(
+        minimum_gap,
+        label_height + minimum_gap -
+          (heights_px[-n] + heights_px[-1L]) / 2
+      )
+      minimum_span <- sum(heights_px) + sum(required_gaps)
+      target_span <- max(baseline_span * requested_span, minimum_span)
+
+      excess <- pmax(baseline_gaps - required_gaps, 0)
+      extra_budget <- max(0, target_span - minimum_span)
+      if (sum(excess) > 0) {
+        packed_gaps <- required_gaps + excess * extra_budget / sum(excess)
+      } else {
+        packed_gaps <- required_gaps
+      }
+
+      packed_span <- sum(heights_px) + sum(packed_gaps)
+      current_top <- (drawable_height - packed_span) / 2
+      packed_centers <- numeric(n)
+      for (i in seq_len(n)) {
+        packed_centers[[i]] <- current_top + heights_px[[i]] / 2
+        if (i < n) {
+          current_top <- current_top + heights_px[[i]] + packed_gaps[[i]]
+        }
+      }
+      packed_centers / drawable_height
+    },
+
+    # Calculate flow-proportional Y positions for each layer. The baseline path
+    # is unchanged at vertical_span = 1. Outer-layer packing runs only after all
+    # node orders have been finalized and never changes ligand or receptor
+    # coordinates.
     .calculate_flow_y = function(layer_nodes_list, links, node_idx) {
-      all_y <- numeric(0)
-
-      for (layer_nodes in layer_nodes_list) {
+      layer_info <- lapply(layer_nodes_list, function(layer_nodes) {
         n <- length(layer_nodes)
-
-        if (n == 0) next
-        if (n == 1) {
-          all_y <- c(all_y, 0.5)
-          next
+        if (n == 0L) {
+          return(list(n = 0L, render_flows = numeric(0), centers = numeric(0)))
         }
 
-        # Total flow through each node (max of incoming, outgoing)
-        flows <- vapply(seq_along(layer_nodes), function(i) {
-          idx <- node_idx[[layer_nodes[i]]]
+        # Total flow through each node (max of incoming, outgoing). These raw
+        # values reproduce the heights Plotly assigns to node rectangles.
+        render_flows <- vapply(seq_along(layer_nodes), function(i) {
+          idx <- node_idx[[layer_nodes[[i]]]]
           incoming <- sum(links$value[links$target == idx])
           outgoing <- sum(links$value[links$source == idx])
           max(incoming, outgoing)
         }, numeric(1))
 
-        # Minimum flow for visibility (5% of max)
-        max_flow <- max(flows)
+        if (n == 1L) {
+          return(list(n = n, render_flows = render_flows, centers = 0.5))
+        }
+
+        # Retain the historical 5%-of-maximum floor for baseline coordinate
+        # allocation. It affects positions only, not node or link widths.
+        coordinate_flows <- render_flows
+        max_flow <- max(coordinate_flows)
         if (max_flow == 0) max_flow <- 1
-        flows <- pmax(flows, max_flow * 0.05)
+        coordinate_flows <- pmax(coordinate_flows, max_flow * 0.05)
+        fractions <- coordinate_flows / sum(coordinate_flows)
 
-        # Normalize to get height fractions
-        total_flow <- sum(flows)
-        fractions <- flows / total_flow
-
-        # Layout in [0.01, 0.99] with proportional gaps
         margin <- 0.01
         available <- 1.0 - 2 * margin
         pad_per_gap <- available * 0.03
-        total_pad <- pad_per_gap * (n - 1)
+        total_pad <- pad_per_gap * (n - 1L)
         content <- available - total_pad
-
-        # If too many nodes, reduce padding to keep >= 50% for content
         if (content < available * 0.5) {
-          pad_per_gap <- (available * 0.5) / max(n - 1, 1)
-          total_pad <- pad_per_gap * (n - 1)
+          pad_per_gap <- (available * 0.5) / max(n - 1L, 1L)
+          total_pad <- pad_per_gap * (n - 1L)
           content <- available - total_pad
         }
 
-        # Node heights proportional to flow
-        heights <- fractions * content
-
-        # Y positions top-to-bottom
-        y_pos <- numeric(n)
+        coordinate_heights <- fractions * content
+        centers <- numeric(n)
         current_y <- margin
         for (i in seq_len(n)) {
-          y_pos[i] <- current_y + heights[i] / 2
-          current_y <- current_y + heights[i] + pad_per_gap
+          centers[[i]] <- current_y + coordinate_heights[[i]] / 2
+          current_y <- current_y + coordinate_heights[[i]] + pad_per_gap
         }
+        list(n = n, render_flows = render_flows, centers = centers)
+      })
 
-        all_y <- c(all_y, y_pos)
+      if (!is.null(private$.outer_vertical_span)) {
+        if (!identical(private$.orientation, "h")) {
+          stop(
+            "vertical_span is currently supported only for horizontal Sankey layouts",
+            call. = FALSE
+          )
+        }
+        drawable_height <- private$.height - private$.margin$t - private$.margin$b
+        if (!is.finite(drawable_height) || drawable_height <= 0) {
+          stop("Plot height and margins leave no drawable vertical space", call. = FALSE)
+        }
+        rendered_heights <- private$.estimate_rendered_heights(
+          layer_info, drawable_height
+        )
+
+        for (layer_name in intersect(
+          c("senders", "receivers"), names(layer_info)
+        )) {
+          requested_span <- private$.outer_vertical_span[[layer_name]]
+          layer_info[[layer_name]]$centers <- private$.pack_layer_centers(
+            layer_info[[layer_name]]$centers,
+            rendered_heights[[layer_name]],
+            requested_span,
+            drawable_height
+          )
+        }
       }
 
-      all_y
+      unname(unlist(lapply(layer_info, function(info) info$centers)))
     },
 
     # Sort links by the full flow path (sender_y, receiver_y) so that at
